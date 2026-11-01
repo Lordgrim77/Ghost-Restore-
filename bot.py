@@ -461,7 +461,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 7. EXECUTE RESTART
     elif data == "restart_do":
         await query.edit_message_text("⏳ Restarting Ghost...", parse_mode=ParseMode.MARKDOWN)
-        res = await asyncio.to_thread(ghost_mgr.run_ghost_cli, "restart")
+        res = await asyncio.to_thread(ghost_mgr.control_service, "restart")
         if res.get("success"):
             text = "✅ *Ghost successfully restarted!*"
         else:

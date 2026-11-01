@@ -69,6 +69,48 @@ class GhostManager:
 
         return "ubuntu"
 
+    def get_systemd_service_name(self):
+        """Find the exact systemd service name for this Ghost instance."""
+        # 1. Check .ghost-cli.json
+        cli_meta_path = os.path.join(self.ghost_dir, ".ghost-cli.json")
+        if os.path.exists(cli_meta_path):
+            try:
+                with open(cli_meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                    name = meta.get("name")
+                    if name:
+                        return f"ghost_{name}"
+            except Exception:
+                pass
+
+        # 2. Check systemd unit directories for ghost_*.service (Ubuntu 24.04 compatible)
+        for unit_dir in ["/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"]:
+            if os.path.exists(unit_dir):
+                services = glob.glob(os.path.join(unit_dir, "ghost_*.service"))
+                if services:
+                    return os.path.basename(services[0]).replace(".service", "")
+
+        return None
+
+    def control_service(self, action):
+        """Controls Ghost using native systemctl if available, or falls back to ghost-cli."""
+        svc_name = self.get_systemd_service_name()
+        if svc_name:
+            if action == "status":
+                cmd = ["systemctl", "is-active", svc_name]
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                is_active = res.returncode == 0
+                return {"success": is_active, "stdout": "running" if is_active else "inactive", "stderr": ""}
+            else:
+                cmd = ["systemctl", action, svc_name]
+                if not is_root():
+                    cmd = ["sudo"] + cmd
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                return {"success": res.returncode == 0, "stdout": res.stdout.strip(), "stderr": res.stderr.strip()}
+
+        # Fallback to Ghost CLI
+        return self.run_ghost_cli(action)
+
     def run_ghost_cli(self, command):
         """Run ghost cli as the proper non-root user."""
         ghost_user = self.get_ghost_user()
@@ -108,8 +150,8 @@ class GhostManager:
         db_info = self.get_database_info()
         ghost_user = self.get_ghost_user()
 
-        # Ghost CLI status check
-        cli_status = self.run_ghost_cli("status")
+        # Systemd / Ghost status check
+        cli_status = self.control_service("status")
         is_running = "running" in cli_status.get("stdout", "").lower()
 
         # Recent Backups Count
@@ -279,7 +321,7 @@ class GhostManager:
         try:
             # 1. Stop Ghost
             notify("⏸️ [1/6] Gracefully stopping Ghost...")
-            self.run_ghost_cli("stop")
+            self.control_service("stop")
 
             # 2. Extract Archive with Backslash Normalization
             notify("📂 [2/6] Extracting archive & normalizing paths...")
@@ -399,9 +441,9 @@ class GhostManager:
                     notify(f"⚠️ Permission setting notice: {e}")
 
             # Start Ghost
-            start_res = self.run_ghost_cli("start")
+            start_res = self.control_service("start")
             if not start_res["success"]:
-                start_res = self.run_ghost_cli("restart")
+                start_res = self.control_service("restart")
 
             # Auto-heal systemd if missing or corrupted
             combined_err = (start_res.get("stderr", "") + " " + start_res.get("stdout", "")).lower()
