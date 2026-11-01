@@ -453,21 +453,32 @@ class GhostManager:
 
     def list_backups(self):
         """Lists available backup archives sorted newest to oldest."""
-        if not os.path.exists(self.backups_dir):
-            return []
-        files = glob.glob(os.path.join(self.backups_dir, "ghost-backup-*.zip"))
+        files = []
+        if os.path.exists(self.backups_dir):
+            files.extend(glob.glob(os.path.join(self.backups_dir, "*.zip")))
+
+        # Also discover any .zip archives in /tmp or /home/*
+        for extra_dir in ["/tmp", "/home/ubuntu"]:
+            if os.path.exists(extra_dir):
+                files.extend(glob.glob(os.path.join(extra_dir, "*.zip")))
+
+        # Deduplicate
+        files = list(set(files))
         results = []
         for f in files:
-            stat = os.stat(f)
-            size_mb = round(stat.st_size / (1024 * 1024), 2)
-            dt = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-            results.append({
-                "path": f,
-                "name": os.path.basename(f),
-                "size_mb": size_mb,
-                "size_bytes": stat.st_size,
-                "date": dt,
-                "mtime": stat.st_mtime
-            })
+            try:
+                stat = os.stat(f)
+                size_mb = round(stat.st_size / (1024 * 1024), 2)
+                dt = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                results.append({
+                    "path": f,
+                    "name": os.path.basename(f),
+                    "size_mb": size_mb,
+                    "size_bytes": stat.st_size,
+                    "date": dt,
+                    "mtime": stat.st_mtime
+                })
+            except Exception:
+                continue
         results.sort(key=lambda x: x["mtime"], reverse=True)
         return results

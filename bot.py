@@ -8,9 +8,11 @@ Repository: https://github.com/Lordgrim77/Ghost-Restore-
 
 import os
 import sys
+import shutil
 import logging
 import asyncio
 import datetime
+import urllib.request
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -52,16 +54,28 @@ BACKUPS_DIR = os.getenv("BACKUPS_DIR", os.path.join(GHOST_DIR, "backups"))
 # Initialize Ghost Manager
 ghost_mgr = GhostManager(ghost_dir=GHOST_DIR, backups_dir=BACKUPS_DIR)
 
-# Temporary dictionary to store pending restore requests per user
-pending_restores = {}
-
 
 def is_authorized(user_id: int) -> bool:
     """Check if the requesting user ID is authorized."""
     if not ALLOWED_USER_IDS:
-        # If no whitelist is configured, allow (or warn)
         return True
     return user_id in ALLOWED_USER_IDS
+
+
+def find_backup_file(file_name: str) -> str:
+    """Search for backup file in known locations."""
+    clean_name = os.path.basename(file_name)
+    candidates = [
+        file_name,
+        os.path.join(BACKUPS_DIR, clean_name),
+        os.path.join("/tmp", clean_name),
+        os.path.join("/home/ubuntu", clean_name),
+        os.path.join(GHOST_DIR, clean_name),
+    ]
+    for c in candidates:
+        if os.path.exists(c) and os.path.isfile(c):
+            return os.path.abspath(c)
+    return None
 
 
 def get_main_menu_keyboard():
@@ -111,7 +125,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         f"👻 *Ghost Publication Manager*\n\n"
         f"Welcome, *{user.first_name}*! Use the buttons below to manage, "
-        f"backup, and restore your Ghost CMS installation with zero downtime.\n\n"
+        f"backup, and restore your Ghost CMS installation.\n\n"
         f"🌐 *Status:* {state_emoji}\n"
         f"🔗 *URL:* `{status.get('url', 'N/A')}`\n"
         f"📁 *Ghost Directory:* `{GHOST_DIR}`\n"
@@ -171,7 +185,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if msg == last_reported:
                 return
             last_reported = msg
-            # Schedule message edit without blocking worker thread
             async def do_edit():
                 try:
                     await query.edit_message_text(
@@ -215,7 +228,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]
         ]
 
-        # If file is <= 48 MB, send directly via Telegram Bot API
+        # Direct Telegram delivery if <= 48 MB
         if size_bytes < 48 * 1024 * 1024:
             await query.edit_message_text(
                 success_text + "📤 *Uploading backup archive to Telegram chat...*",
@@ -230,7 +243,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         caption=f"📦 Ghost Backup ({size_mb} MB) - {res.get('timestamp')}",
                         reply_markup=InlineKeyboardMarkup(keyboard)
                     )
-                # Cleanup the progress message
                 try:
                     await query.delete_message()
                 except Exception:
@@ -283,8 +295,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not backups:
             text = (
                 "📁 *No Backups Found*\n\n"
-                f"No backup archives were found in `{BACKUPS_DIR}`.\n"
-                "Tap *Create Backup* or drag & drop a `.zip` file here to upload!"
+                f"No backup archives were found in `{BACKUPS_DIR}`, `/tmp`, or `/home/ubuntu`.\n\n"
+                "💡 *Options:*\n"
+                "• Tap *Create Backup* to create one right now.\n"
+                "• Upload a zip under 20 MB directly to this chat.\n"
+                "• Send `/url <download_link>` to fetch from Google Drive, Dropbox, or file.io.\n"
+                "• Upload via GCP SSH to `/home/ubuntu/` and type `/restore <filename>`."
             )
             keyboard = [
                 [InlineKeyboardButton("📦 Create Backup Now", callback_data="menu_backup")],
@@ -299,12 +315,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = (
             f"📑 *Available Backups* ({len(backups)} found)\n\n"
-            f"Select a backup below to restore it or inspect:\n"
-            f"_(Or upload any `.zip` backup directly to this chat)_"
+            f"Select a backup below to restore it:\n"
+            f"_(Or send `/url <link>` or `/restore <path>`)_"
         )
 
         keyboard = []
-        for b in backups[:6]:  # Show latest 6
+        for b in backups[:8]:  # Show latest 8
             keyboard.append([
                 InlineKeyboardButton(
                     f"📦 {b['name']} ({b['size_mb']} MB)",
@@ -323,20 +339,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 4. CONFIRM RESTORE QUESTION
     elif data.startswith("restore_ask_"):
         file_name = data.replace("restore_ask_", "")
-        file_path = os.path.join(BACKUPS_DIR, file_name)
+        real_path = find_backup_file(file_name)
 
-        if not os.path.exists(file_path):
+        if not real_path:
             await query.edit_message_text(
-                f"❌ File `{file_name}` not found on server.",
+                f"❌ File `{file_name}` not found on server in any storage path.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="menu_restore_list")]]),
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
-        size_mb = round(os.path.getsize(file_path) / (1024 * 1024), 2)
+        size_mb = round(os.path.getsize(real_path) / (1024 * 1024), 2)
         confirm_text = (
             f"⚠️ *Confirm Ghost Publication Restore*\n\n"
-            f"📦 *Archive:* `{file_name}`\n"
+            f"📦 *Archive:* `{os.path.basename(real_path)}`\n"
+            f"📁 *Path:* `{real_path}`\n"
             f"⚖️ *Size:* `{size_mb} MB`\n\n"
             f"🚨 *Warning:* This operation will:\n"
             f"1. Gracefully stop Ghost\n"
@@ -347,7 +364,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         keyboard = [
-            [InlineKeyboardButton("✅ Yes, Restore Now", callback_data=f"restore_do_{file_name}")],
+            [InlineKeyboardButton("✅ Yes, Restore Now", callback_data=f"restore_do_{os.path.basename(real_path)}")],
             [InlineKeyboardButton("❌ Cancel", callback_data="menu_restore_list")]
         ]
         await query.edit_message_text(
@@ -359,10 +376,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 5. EXECUTE RESTORE
     elif data.startswith("restore_do_"):
         file_name = data.replace("restore_do_", "")
-        file_path = os.path.join(BACKUPS_DIR, file_name)
+        real_path = find_backup_file(file_name)
+
+        if not real_path:
+            await query.edit_message_text(
+                f"❌ File `{file_name}` not found on server.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
 
         await query.edit_message_text(
-            f"⏳ *Starting Restore for `{file_name}`...*\n\n"
+            f"⏳ *Starting Restore for `{os.path.basename(real_path)}`...*\n\n"
             f"Please wait while Ghost restores your publication...",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -385,7 +410,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
             asyncio.run_coroutine_threadsafe(do_edit(), loop)
 
-        res = await asyncio.to_thread(ghost_mgr.restore_backup, file_path, progress_callback=progress_cb)
+        res = await asyncio.to_thread(ghost_mgr.restore_backup, real_path, progress_callback=progress_cb)
 
         if not res.get("success"):
             err_text = (
@@ -457,13 +482,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         help_text = (
             "ℹ️ *Ghost Telegram Bot Help*\n\n"
             "• *📦 Create Backup:* Takes a complete snapshot of custom themes, uploaded images, "
-            "routes, and your database (MySQL/SQLite) into a single cross-platform `.zip` archive. "
-            "If under 50 MB, it sends the file right here in chat!\n\n"
+            "routes, and database (MySQL/SQLite) into a single `.zip` archive. "
+            "If under 48 MB, sends it directly in this chat!\n\n"
             "• *♻️ Restore Backup:* Restores a saved backup. Auto-fixes path slashes, protects default "
-            "Ghost theme symlinks (`casper`/`source`), applies MySQL/SQLite content, and restarts Ghost.\n\n"
-            "• *📤 Drag-and-Drop Restore:* You can upload any `.zip` backup directly into this Telegram chat "
-            "at any time, and the bot will ask if you want to restore it immediately!\n\n"
-            "• *📊 Status:* Shows current Ghost uptime, active themes, and database details."
+            "Ghost theme symlinks (`casper`/`source`), syncs database, and restarts Ghost.\n\n"
+            "• *🔗 URL Download:* Send `/url <link>` to download and restore any backup hosted online "
+            "(Google Drive, Dropbox, file.io, etc.).\n\n"
+            "• *📁 Local Restore:* Send `/restore /path/to/backup.zip` to restore any file on the server.\n\n"
+            "• *📊 Status:* Shows Ghost uptime, active themes, and database details."
         )
         keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
         await query.edit_message_text(
@@ -492,14 +518,33 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    size_mb = round(doc.file_size / (1024 * 1024), 2)
+    # Check 20 MB Telegram Bot API download limit
+    file_size_bytes = doc.file_size or 0
+    size_mb = round(file_size_bytes / (1024 * 1024), 2)
+
+    if file_size_bytes > 20 * 1024 * 1024:
+        limit_msg = (
+            f"⚠️ *File is Too Large for Telegram Direct Upload ({size_mb} MB)*\n\n"
+            f"Telegram limits bots to downloading files of *up to 20 MB*.\n\n"
+            f"💡 *2 Easy Ways to Restore This Backup:*\n\n"
+            f"1️⃣ **Direct URL Download (Fastest)**:\n"
+            f"Upload your backup to [file.io](https://www.file.io), Google Drive, or Dropbox, and send:\n"
+            f"`/url <download_link>`\n\n"
+            f"2️⃣ **Upload via GCP Web Terminal**:\n"
+            f"In your GCP SSH browser window, click the **Gear Icon ⚙️ (top-right)** ➔ **Upload file**.\n"
+            f"Once uploaded to `/home/ubuntu/{file_name}`, send:\n"
+            f"`/restore /home/ubuntu/{file_name}`\n"
+            f"*(or tap ♻️ Restore Backup in the menu)*"
+        )
+        await update.message.reply_text(limit_msg, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        return
+
     progress_msg = await update.message.reply_text(
         f"📥 *Receiving backup archive `{file_name}` ({size_mb} MB)...*",
         parse_mode=ParseMode.MARKDOWN
     )
 
     try:
-        # Generate safe destination path
         clean_name = Path(file_name).name
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         target_name = f"uploaded_{timestamp}_{clean_name}"
@@ -535,18 +580,123 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Download backup archive directly from a given URL."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        await send_unauthorized(update)
+        return
+
+    if not context.args or not context.args[0].startswith("http"):
+        await update.message.reply_text(
+            "ℹ️ *Usage:*\n`/url <download_link>`\n\n"
+            "Example: `/url https://file.io/xxxxxx` or a Dropbox/Google Drive share link.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    raw_url = context.args[0].strip()
+    # Normalize Dropbox links to direct download
+    if "dropbox.com" in raw_url:
+        raw_url = raw_url.replace("dl=0", "dl=1")
+
+    status_msg = await update.message.reply_text(
+        "⏳ *Downloading backup archive from URL directly to server...*",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        target_name = f"url_backup_{timestamp}.zip"
+        target_path = os.path.join(BACKUPS_DIR, target_name)
+
+        def do_download():
+            req = urllib.request.Request(
+                raw_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            )
+            with urllib.request.urlopen(req, timeout=180) as resp, open(target_path, "wb") as out:
+                shutil.copyfileobj(resp, out)
+
+        await asyncio.to_thread(do_download)
+
+        size_mb = round(os.path.getsize(target_path) / (1024 * 1024), 2)
+        text = (
+            f"📥 *Backup Downloaded Successfully!*\n\n"
+            f"📦 *Name:* `{target_name}`\n"
+            f"⚖️ *Size:* `{size_mb} MB`\n"
+            f"💾 *Saved to:* `{target_path}`\n\n"
+            f"Would you like to restore your Ghost publication with this archive right now?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("✅ Yes, Restore Now", callback_data=f"restore_ask_{target_name}")],
+            [InlineKeyboardButton("❌ Keep in Storage", callback_data="menu_restore_list")]
+        ]
+        await status_msg.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logger.error(f"Download failed: {e}")
+        await status_msg.edit_text(f"❌ *Download Failed:*\n`{e}`", parse_mode=ParseMode.MARKDOWN)
+
+
+async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Restore from a specific local path or filename on the server."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        await send_unauthorized(update)
+        return
+
+    if not context.args:
+        # Show list of backups
+        backups = ghost_mgr.list_backups()
+        if not backups:
+            await update.message.reply_text(
+                "📁 No backups found.\nUsage: `/restore /path/to/backup.zip`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        keyboard = []
+        for b in backups[:8]:
+            keyboard.append([InlineKeyboardButton(f"📦 {b['name']} ({b['size_mb']} MB)", callback_data=f"restore_ask_{b['name']}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")])
+        await update.message.reply_text("Select a backup to restore:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    target = " ".join(context.args).strip()
+    real_path = find_backup_file(target)
+
+    if not real_path:
+        await update.message.reply_text(f"❌ File not found on server:\n`{target}`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    size_mb = round(os.path.getsize(real_path) / (1024 * 1024), 2)
+    name = os.path.basename(real_path)
+    text = (
+        f"⚠️ *Confirm Restore from Server File*\n\n"
+        f"📦 *Name:* `{name}`\n"
+        f"📁 *Path:* `{real_path}`\n"
+        f"⚖️ *Size:* `{size_mb} MB`\n\n"
+        f"Are you sure you want to restore Ghost using this archive?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("✅ Yes, Restore Now", callback_data=f"restore_ask_{name}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="main_menu")]
+    ]
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+
 def main():
     """Start the Telegram bot application."""
     if not BOT_TOKEN or BOT_TOKEN == "your_bot_token_here":
         print("[ERROR] TELEGRAM_BOT_TOKEN is not configured in .env!")
-        print("Please set your bot token from @BotFather in .env or during installation.")
+        print("Please set your bot token from @BotFather in .env.")
         sys.exit(1)
 
     print("==================================================")
     print("   Ghost Backup & Restore Telegram Bot Service    ")
     print("==================================================")
-    print(f"Ghost Directory:    {GHOST_DIR}")
-    print(f"Backups Directory:  {BACKUPS_DIR}")
+    print(f"Ghost Directory:     {GHOST_DIR}")
+    print(f"Backups Directory:   {BACKUPS_DIR}")
     print(f"Authorized User IDs: {ALLOWED_USER_IDS or 'All Users (Open)'}")
     print("--------------------------------------------------")
     print("Bot is starting polling...")
@@ -555,6 +705,8 @@ def main():
 
     # Handlers
     app.add_handler(CommandHandler(["start", "menu"], start_command))
+    app.add_handler(CommandHandler("url", url_command))
+    app.add_handler(CommandHandler("restore", restore_command))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
