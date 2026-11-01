@@ -44,20 +44,10 @@ class GhostManager:
             return {"error": str(e)}
 
     def get_ghost_user(self):
-        """Determine non-root user to execute Ghost CLI commands."""
-        # 1. Check directory owner
-        if pwd:
-            try:
-                stat_info = os.stat(self.ghost_dir)
-                owner_name = pwd.getpwuid(stat_info.st_uid).pw_name
-                if owner_name not in ["root", "daemon"]:
-                    return owner_name
-            except Exception:
-                pass
-
-        # 2. Check for 'ghost' or 'ubuntu' user
-        for candidate in ["ghost", "ubuntu", os.environ.get("SUDO_USER"), os.environ.get("USER")]:
-            if candidate and candidate != "root":
+        """Determine non-root user with sudo access to execute Ghost CLI commands."""
+        # 1. Prefer regular sudo user like 'ubuntu', never the 'ghost' service account
+        for candidate in ["ubuntu", os.environ.get("SUDO_USER"), os.environ.get("USER")]:
+            if candidate and candidate not in ["root", "ghost", "daemon"]:
                 if pwd:
                     try:
                         pwd.getpwnam(candidate)
@@ -66,6 +56,17 @@ class GhostManager:
                         continue
                 else:
                     return candidate
+
+        # 2. Check directory owner (if not root or ghost)
+        if pwd:
+            try:
+                stat_info = os.stat(self.ghost_dir)
+                owner_name = pwd.getpwuid(stat_info.st_uid).pw_name
+                if owner_name not in ["root", "ghost", "daemon"]:
+                    return owner_name
+            except Exception:
+                pass
+
         return "ubuntu"
 
     def run_ghost_cli(self, command):
@@ -385,20 +386,29 @@ class GhostManager:
 
             # 6. Fix Permissions & Restart Ghost
             notify("🔑 [6/6] Fixing Linux ownership & starting Ghost...")
-            ghost_user = self.get_ghost_user()
+            cli_user = self.get_ghost_user()
             if is_root():  # If root, fix ownership
                 try:
-                    subprocess.run(["chown", "-R", f"{ghost_user}:{ghost_user}", target_content], check=False)
+                    # Content folder owned by ghost runtime user
+                    subprocess.run(["chown", "-R", "ghost:ghost", target_content], check=False)
                     subprocess.run(["find", target_content, "-type", "d", "-exec", "chmod", "775", "{}", "+"], check=False)
                     subprocess.run(["find", target_content, "-type", "f", "-exec", "chmod", "664", "{}", "+"], check=False)
+                    # Base ghost directory owned by CLI user (ubuntu)
+                    subprocess.run(["chown", f"{cli_user}:{cli_user}", self.ghost_dir], check=False)
                 except Exception as e:
                     notify(f"⚠️ Permission setting notice: {e}")
 
             # Start Ghost
             start_res = self.run_ghost_cli("start")
             if not start_res["success"]:
-                # Try restart
                 start_res = self.run_ghost_cli("restart")
+
+            # Auto-heal systemd if missing or corrupted
+            combined_err = (start_res.get("stderr", "") + " " + start_res.get("stdout", "")).lower()
+            if not start_res["success"] and ("systemd" in combined_err or "corrupted" in combined_err):
+                notify("🔧 Re-linking Ghost systemd service...")
+                self.run_ghost_cli("setup linux-user systemd --no-prompt")
+                start_res = self.run_ghost_cli("start")
 
             notify("🎉 [SUCCESS] Ghost publication restored & restarted!")
             return {"success": True, "details": start_res}
