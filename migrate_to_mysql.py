@@ -30,10 +30,21 @@ MYSQL_PASS = "GhostSecureProd2026!"
 MYSQL_HOST = "127.0.0.1"
 MYSQL_PORT = 3306
 
+def restore_permissions(config_path=None):
+    if not config_path:
+        config_path = os.path.join(GHOST_DIR, "config.production.json")
+    sudo_user = os.environ.get("SUDO_USER", "ubuntu")
+    subprocess.run(["chown", "-R", f"{sudo_user}:ghost", GHOST_DIR], check=False)
+    subprocess.run(["chown", "-R", "ghost:ghost", os.path.join(GHOST_DIR, "content")], check=False)
+    if os.path.exists(config_path):
+        subprocess.run(["chmod", "664", config_path], check=False)
+    subprocess.run(["chmod", "775", GHOST_DIR], check=False)
+
 def log(msg):
     print(f"[*] {msg}", flush=True)
 
 def error(msg):
+    restore_permissions()
     print(f"\n[ERROR] {msg}", file=sys.stderr, flush=True)
     sys.exit(1)
 
@@ -135,6 +146,7 @@ def main():
     }
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
+    restore_permissions(config_path)
 
     # 6. Initialize Ghost tables in MySQL via boot if needed
     log("Step 5/6: Verifying MySQL tables & schema...")
@@ -152,7 +164,7 @@ def main():
 
     if not schema_ready:
         log("Booting Ghost to initialize schema...")
-        subprocess.run(["chown", "-R", "ghost:ghost", GHOST_DIR], check=False)
+        restore_permissions(config_path)
         subprocess.run(["systemctl", "start", svc_name], check=False)
         for _ in range(25):
             time.sleep(1)
@@ -180,7 +192,7 @@ def main():
         for line in res.stdout.strip().split("\n"):
             parts = line.split("\t")
             if len(parts) >= 3:
-                mysql_types[(parts[0], parts[1])] = parts[2].lower()
+                mysql_types[(parts[0].lower(), parts[1].lower())] = parts[2].lower()
     log(f"Mapped {len(mysql_types)} column types from MySQL schema.")
 
     # 7. Migrate all SQLite data into MySQL with Datetime Normalization
@@ -196,7 +208,7 @@ def main():
         if val is None:
             return "NULL"
         
-        target_type = mysql_types.get((table_name, col_name), "")
+        target_type = mysql_types.get((table_name.lower(), col_name.lower()), "")
         col_lower = col_name.lower()
         is_dt = (
             target_type in ("datetime", "timestamp", "date") or
@@ -205,6 +217,8 @@ def main():
         )
 
         if is_dt:
+            if val == "" or str(val).lower() in ("null", "none", "undefined"):
+                return "NULL"
             # Handle millisecond epoch or second epoch integer/float
             if isinstance(val, (int, float)) and val > 1000000000:
                 ts = val / 1000.0 if val > 1000000000000 else float(val)
@@ -223,6 +237,9 @@ def main():
                     return f"'{clean}'"
                 elif re.match(r'^\d{4}-\d{2}-\d{2}$', clean):
                     return f"'{clean} 00:00:00'"
+            # If target column in MySQL is datetime/timestamp, ensure we don't insert invalid syntax
+            if target_type in ("datetime", "timestamp", "date"):
+                return "NULL"
 
         if isinstance(val, (int, float)):
             return str(val)
@@ -247,7 +264,7 @@ def main():
             raw_cols = list(rows[0].keys())
             # Keep only columns that exist in target MySQL table if schema mapped
             if mysql_types:
-                valid_cols = [c for c in raw_cols if (t, c) in mysql_types]
+                valid_cols = [c for c in raw_cols if (t.lower(), c.lower()) in mysql_types]
             else:
                 valid_cols = raw_cols
 
@@ -283,8 +300,8 @@ def main():
     log(f"Successfully migrated {total_migrated} records into MySQL!")
 
     # 8. Set final permissions & start Ghost permanently on MySQL
-    subprocess.run(["chown", "-R", "ghost:ghost", GHOST_DIR], check=False)
-    subprocess.run(["systemctl", "start", svc_name], check=False)
+    restore_permissions(config_path)
+    subprocess.run(["systemctl", "restart", svc_name], check=False)
     time.sleep(3)
 
     final_status = subprocess.run(["systemctl", "is-active", svc_name], capture_output=True, text=True)
