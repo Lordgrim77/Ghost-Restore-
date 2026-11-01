@@ -9,9 +9,23 @@ SVC="ghost_pedohunters-xlordgrim-com"
 echo "[*] Downloading latest Alto theme package..."
 sudo curl -sSL -H "Cache-Control: no-cache" "$ZIP_URL" -o /tmp/alto-theme-latest.zip
 
-echo "[*] Unpacking into $THEME_DIR..."
-sudo mkdir -p "$THEME_DIR"
-sudo unzip -q -o /tmp/alto-theme-latest.zip -d "$THEME_DIR"
+echo "[*] Cleaning up any old backslash artifact files..."
+sudo find "$THEME_DIR" -type f -name "*\\*" -delete 2>/dev/null || true
+
+echo "[*] Unpacking cleanly into $THEME_DIR..."
+sudo python3 -c "
+import zipfile, os
+with zipfile.ZipFile('/tmp/alto-theme-latest.zip', 'r') as zf:
+    for item in zf.infolist():
+        clean_name = item.filename.replace('\\\\', '/').lstrip('/')
+        target_path = os.path.join('$THEME_DIR', clean_name)
+        if item.is_dir() or clean_name.endswith('/'):
+            os.makedirs(target_path, exist_ok=True)
+        else:
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with zf.open(item) as src, open(target_path, 'wb') as dst:
+                dst.write(src.read())
+"
 sudo rm -f /tmp/alto-theme-latest.zip
 
 echo "[*] Setting file permissions..."
@@ -22,7 +36,6 @@ echo "[*] Restarting Ghost..."
 if systemctl is-active --quiet "$SVC"; then
     sudo systemctl restart "$SVC"
 else
-    # Try generic restart if specific service name varies
     sudo systemctl restart ghost_* 2>/dev/null || true
 fi
 
