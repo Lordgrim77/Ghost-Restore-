@@ -1,0 +1,22 @@
+# Environment variables
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+ENV/
+
+# Temporary / backups
+backups/
+*.zip
+*.tar.gz
+*.sql
+*.db
+
+# OS files
+.DS_Store
+Thumbs.db
