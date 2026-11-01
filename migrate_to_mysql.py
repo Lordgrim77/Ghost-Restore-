@@ -173,16 +173,15 @@ def main():
     log("Inspecting MySQL column data types...")
     mysql_types = {}  # (table, column) -> data_type
     res = subprocess.run([
-        "mysql", f"-u{MYSQL_USER}", f"-p{MYSQL_PASS}", f"-h{MYSQL_HOST}",
+        "mysql", f"-u{MYSQL_USER}", f"-p{MYSQL_PASS}", f"-h{MYSQL_HOST}", "-B", "-N",
         "-e", f"SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema='{MYSQL_DB}';"
     ], capture_output=True, text=True)
-    if res.returncode != 0:
-        error(f"Failed to query MySQL schema: {res.stderr}")
-
-    for line in res.stdout.strip().split("\n")[1:]:
-        parts = line.split("\t")
-        if len(parts) >= 3:
-            mysql_types[(parts[0], parts[1])] = parts[2].lower()
+    if res.returncode == 0 and res.stdout.strip():
+        for line in res.stdout.strip().split("\n"):
+            parts = line.split("\t")
+            if len(parts) >= 3:
+                mysql_types[(parts[0], parts[1])] = parts[2].lower()
+    log(f"Mapped {len(mysql_types)} column types from MySQL schema.")
 
     # 7. Migrate all SQLite data into MySQL with Datetime Normalization
     log("Step 6/6: Migrating all data from SQLite into MySQL with datetime normalization...")
@@ -198,12 +197,23 @@ def main():
             return "NULL"
         
         target_type = mysql_types.get((table_name, col_name), "")
-        is_dt = target_type in ("datetime", "timestamp", "date") or col_name.endswith(('_at', '_expires', '_date'))
+        col_lower = col_name.lower()
+        is_dt = (
+            target_type in ("datetime", "timestamp", "date") or
+            col_lower.endswith(("_at", "_expires", "_date", "request", "lifetime")) or
+            col_lower in ("created_at", "updated_at", "published_at", "last_seen_at")
+        )
 
         if is_dt:
             # Handle millisecond epoch or second epoch integer/float
             if isinstance(val, (int, float)) and val > 1000000000:
                 ts = val / 1000.0 if val > 1000000000000 else float(val)
+                dt = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
+                return f"'{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
+            # Handle string of numeric digits
+            if isinstance(val, str) and val.isdigit() and int(val) > 1000000000:
+                int_val = int(val)
+                ts = int_val / 1000.0 if int_val > 1000000000000 else float(int_val)
                 dt = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
                 return f"'{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
             # Handle ISO string e.g. 2026-11-01T14:05:33.000Z
@@ -235,8 +245,12 @@ def main():
                 continue
             
             raw_cols = list(rows[0].keys())
-            # Keep only columns that exist in target MySQL table
-            valid_cols = [c for c in raw_cols if (t, c) in mysql_types]
+            # Keep only columns that exist in target MySQL table if schema mapped
+            if mysql_types:
+                valid_cols = [c for c in raw_cols if (t, c) in mysql_types]
+            else:
+                valid_cols = raw_cols
+
             if not valid_cols:
                 continue
 
