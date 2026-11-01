@@ -11,10 +11,10 @@ An interactive Telegram Bot for **1-Click Full Backup & Restore** of any Ghost C
 
 ## ⚡ Quick 1-Click Install (Ubuntu)
 
-Run this single command on your Ubuntu server as `root` (or with `sudo`):
+Run this command on your Ubuntu server:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main/install.sh -o /tmp/install.sh && sudo bash /tmp/install.sh
 ```
 
 The installer will:
@@ -172,3 +172,4 @@ sudo bash /opt/ghost-telegram-bot/uninstall.sh
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
