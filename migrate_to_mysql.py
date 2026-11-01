@@ -180,6 +180,10 @@ def main():
                     break
         subprocess.run(["systemctl", "stop", svc_name], check=False)
         time.sleep(1)
+        subprocess.run([
+            "mysql", f"-u{MYSQL_USER}", f"-p{MYSQL_PASS}", f"-h{MYSQL_HOST}",
+            "-e", f"UPDATE `{MYSQL_DB}`.migrations_lock SET locked = 0;"
+        ], check=False)
 
     # Fetch exact MySQL column schema for strict type alignment
     log("Inspecting MySQL column data types...")
@@ -299,7 +303,11 @@ def main():
 
     log(f"Successfully migrated {total_migrated} records into MySQL!")
 
-    # 8. Set final permissions & start Ghost permanently on MySQL
+    # 8. Unlock migrations, set final permissions & start Ghost permanently on MySQL
+    subprocess.run([
+        "mysql", f"-u{MYSQL_USER}", f"-p{MYSQL_PASS}", f"-h{MYSQL_HOST}",
+        "-e", f"UPDATE `{MYSQL_DB}`.migrations_lock SET locked = 0;"
+    ], check=False)
     restore_permissions(config_path)
     subprocess.run(["systemctl", "restart", svc_name], check=False)
     time.sleep(3)
