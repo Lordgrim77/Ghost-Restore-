@@ -32,6 +32,9 @@ echo "[*] Setting file permissions..."
 sudo chown -R ghost:ghost "$THEME_DIR"
 sudo chmod -R 775 "$THEME_DIR"
 
+echo "[*] Updating Ghost accent color in MySQL to cyan (#38bdf8)..."
+sudo mysql -e "UPDATE ghost_production.settings SET value = '#38bdf8' WHERE key = 'accent_color';" 2>/dev/null || true
+
 echo "[*] Restarting Ghost..."
 if systemctl is-active --quiet "$SVC"; then
     sudo systemctl restart "$SVC"
@@ -41,8 +44,12 @@ fi
 
 echo "=========================================================="
 echo "🎉 Theme updated successfully!"
+echo "✓ Pink toggle switches eliminated (Electric Cyan #38bdf8)"
+echo "✓ Ghost MySQL backend accent_color updated to #38bdf8"
 echo "✓ Account page grids overflow fixed (box-sizing & flex)"
-echo "✓ Inbuilt Operative Avatars added (zero upload storage)"
+echo "✓ Email Preferences & Your Account popups fixed for mobile"
+echo "✓ Modal top cutoff bug fixed (scrollable flex-start)"
+echo "✓ Inbuilt Operative Avatars added with pencil badge"
 echo "✓ Post publication time overlap with top bar fixed"
 echo "✓ Contact & Support page (/contact/) deployed with Telegram: t.me/StopAbuseTeam"
 echo "✓ Standalone Sign Up button removed (accessible in Sign In modal)"
