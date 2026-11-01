@@ -254,6 +254,8 @@ class GhostManager:
                     if os.path.isdir(full_theme):
                         dest_theme = os.path.join(staging_themes, t)
                         shutil.copytree(full_theme, dest_theme, ignore=shutil.ignore_patterns(".git", "node_modules"))
+                    elif os.path.isfile(full_theme):
+                        shutil.copy2(full_theme, os.path.join(staging_themes, t))
 
             # 3. Backup Uploaded Media & Settings
             notify("🖼️ [4/5] Archiving media images & routes...")
@@ -356,9 +358,18 @@ class GhostManager:
                     # Don't overwrite if destination is an active core symlink
                     if os.path.islink(dest_theme):
                         continue
-                    if os.path.isdir(dest_theme):
-                        shutil.rmtree(dest_theme, ignore_errors=True)
-                    shutil.copytree(src_theme, dest_theme)
+
+                    if os.path.isdir(src_theme):
+                        if os.path.exists(dest_theme):
+                            if os.path.isdir(dest_theme):
+                                shutil.rmtree(dest_theme, ignore_errors=True)
+                            else:
+                                os.remove(dest_theme)
+                        shutil.copytree(src_theme, dest_theme)
+                    elif os.path.isfile(src_theme):
+                        if os.path.exists(dest_theme) and os.path.isdir(dest_theme):
+                            shutil.rmtree(dest_theme, ignore_errors=True)
+                        shutil.copy2(src_theme, dest_theme)
 
             # 4. Restore Media & Routes
             notify("🖼️ [4/6] Restoring uploaded images & route settings...")
