@@ -13,6 +13,7 @@ ENV/
 # Temporary / backups
 backups/
 *.zip
+!alto-theme-latest.zip
 *.tar.gz
 *.sql
 *.db
@@ -20,3 +21,4 @@ backups/
 # OS files
 .DS_Store
 Thumbs.db
+
