@@ -1,0 +1,18 @@
+routes:
+  /account/:
+    template: account
+  /posts/:
+    template: posts
+  /contact/:
+    template: page-contact
+  /support/:
+    template: page-support
+
+collections:
+  /:
+    permalink: /{slug}/
+    template: index
+
+taxonomies:
+  tag: /tag/{slug}/
+  author: /author/{slug}/
