@@ -94,6 +94,8 @@ def package_emails():
     files_to_pack = [
         # Mail
         "lib/mail/ghost-mailer.js",
+        "lib/mail/email-content-generator.js",
+        "lib/mail/index.js",
         "lib/mail/templates/invite-user.html",
         "lib/mail/templates/reset-password.html",
         "lib/mail/templates/welcome.html",
@@ -133,6 +135,7 @@ def package_emails():
         "services/staff/email-templates/recommendation-received.hbs",
         # Gifts
         "services/gifts/index.js",
+        "services/gifts/gift-email-service.js",
         "services/gifts/email-templates/gift-delivery.hbs",
         "services/gifts/email-templates/gift-purchase-confirmation.hbs",
         "services/gifts/email-templates/gift-reminder.hbs",
@@ -140,6 +143,7 @@ def package_emails():
         "services/gifts/email-templates/gift-delivery-failure.hbs",
         "services/gifts/email-templates/gift-sent-confirmation.hbs",
         # Member Welcome
+        "services/member-welcome-emails/service.js",
         "services/member-welcome-emails/member-welcome-email-renderer.js",
         "services/member-welcome-emails/email-templates/wrapper.hbs",
         # Meta & Social
