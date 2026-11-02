@@ -109,7 +109,13 @@ module.exports = ({
             <!-- FOOTER AREA -->
             <tr>
               <td align="center" style="padding-top: 32px; padding-bottom: 16px; text-align: center;">
-                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0 0 8px 0; line-height: 1.5;">${t('If you did not make this request, you can safely ignore this email.')}</p>
+                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0 0 6px 0; line-height: 1.5;">
+                  Official Publication &bull; Sent from <span style="color: rgba(255, 255, 255, 0.65);">noreply@pedohunters.help</span>
+                </p>
+                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0 0 6px 0; line-height: 1.5;">
+                  Contact: <a href="mailto:contact@pedohunters.help" style="color: rgba(255, 255, 255, 0.65); text-decoration: underline;">contact@pedohunters.help</a>
+                </p>
+                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0 0 6px 0; line-height: 1.5;">${t('If you did not make this request, you can safely ignore this email.')}</p>
                 <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0; line-height: 1.5;">${t('This message was sent from {siteDomain} to {email}.', { siteDomain: '<a href="' + siteUrl + '" style="color: rgba(255, 255, 255, 0.65); text-decoration: underline;">' + siteDomain + '</a>', email: '<span style="color: rgba(255, 255, 255, 0.65);">' + email + '</span>', interpolation: { escapeValue: false } })}</p>
               </td>
             </tr>

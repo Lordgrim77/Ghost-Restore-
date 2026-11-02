@@ -99,6 +99,12 @@ INSERT IGNORE INTO ghost_production.posts (
 FROM ghost_production.posts WHERE slug = 'about' LIMIT 1;
 " 2>/dev/null || true
 
+UPDATE_EMAIL_DB_URL="https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main/update_email_db.py?v=$(date +%s)"
+if sudo curl -sSL -f -H "Cache-Control: no-cache" "$UPDATE_EMAIL_DB_URL" -o /tmp/update_email_db.py 2>/dev/null; then
+    sudo python3 /tmp/update_email_db.py || true
+    sudo rm -f /tmp/update_email_db.py
+fi
+
 echo "[*] Restarting Ghost..."
 if systemctl is-active --quiet "$SVC"; then
     sudo systemctl restart "$SVC"

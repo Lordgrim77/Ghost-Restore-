@@ -1,29 +1,136 @@
-{{#> emailWrapper}}
-              <tr>
-                <td class="wrapper">
-                  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-                    <tr class="post-content-row">
-                      <td class="{{classes.content}}">
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="color-scheme" content="dark">
+    <meta name="supported-color-schemes" content="dark">
+    <title>{{#if emailTitle}}{{emailTitle}}{{else}}Welcome to {{siteTitle}}{{/if}}</title>
+    <style>
+    @media only screen and (max-width: 620px) {
+      .container {
+        width: 100% !important;
+        padding: 16px 10px !important;
+      }
+      .main-card {
+        padding: 30px 22px !important;
+        border-radius: 16px !important;
+      }
+      h1.heading {
+        font-size: 21px !important;
+        margin-bottom: 12px !important;
+      }
+      .btn-cta {
+        display: block !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        text-align: center !important;
+        padding: 14px 20px !important;
+      }
+    }
+    @media all {
+      .ExternalClass { width: 100%; }
+      .ExternalClass, .ExternalClass p, .ExternalClass span, .ExternalClass font, .ExternalClass td, .ExternalClass div { line-height: 100%; }
+    }
+    a {
+      color: #ffffff;
+      text-decoration: underline;
+    }
+    .welcome-body p {
+      color: rgba(255, 255, 255, 0.78) !important;
+      font-size: 15px !important;
+      line-height: 1.6 !important;
+      margin: 0 0 16px 0 !important;
+    }
+    .welcome-body a {
+      color: #ffffff !important;
+      text-decoration: underline !important;
+      font-weight: 600 !important;
+    }
+    </style>
+  </head>
+  <body style="background-color: #08090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.6; margin: 0; padding: 0; -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%;">
+    <!-- PREHEADER TEXT -->
+    <span style="color: transparent; display: none; height: 0; max-height: 0; max-width: 0; opacity: 0; overflow: hidden; mso-hide: all; visibility: hidden; width: 0;">Welcome to {{siteTitle}}. Your subscription is confirmed.</span>
+    <div style="display:none; max-height:0; overflow:hidden; mso-hide: all;" aria-hidden="true" role="presentation">&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;</div>
+
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #08090b; width: 100%;">
+      <tr>
+        <td align="center" style="padding: 42px 16px;">
+          <table border="0" cellpadding="0" cellspacing="0" class="container" style="max-width: 540px; width: 100%; margin: 0 auto;">
+
+            <!-- BRAND LOGO / TITLE HEADER -->
+            <tr>
+              <td align="center" style="padding-bottom: 28px;">
+                {{#if site.iconUrl}}
+                  <a href="{{site.url}}" target="_blank" style="text-decoration: none; display: inline-block;">
+                    <img src="{{site.iconUrl}}" alt="{{siteTitle}}" style="max-height: 48px; max-width: 230px; height: auto; width: auto; border: 0; display: block; margin: 0 auto; object-fit: contain;" />
+                  </a>
+                {{else}}
+                  <a href="{{site.url}}" target="_blank" style="text-decoration: none; display: inline-block; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff; text-transform: uppercase;">{{siteTitle}}</a>
+                {{/if}}
+              </td>
+            </tr>
+
+            <!-- MAIN OBSIDIAN CARD -->
+            <tr>
+              <td>
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" class="main-card" style="background: #111318; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 20px; padding: 42px 38px; box-shadow: 0 16px 44px rgba(0, 0, 0, 0.55);">
+                  <tr>
+                    <td>
+                      <div style="display: inline-block; padding: 5px 12px; background: rgba(255, 255, 255, 0.08); border-radius: 20px; font-size: 12px; font-weight: 700; color: #ffffff; margin-bottom: 16px; letter-spacing: 0.05em; text-transform: uppercase;">Subscription Confirmed</div>
+                      <h1 class="heading" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.025em; margin: 0 0 18px 0; line-height: 1.3;">{{#if emailTitle}}{{emailTitle}}{{else}}Welcome to {{siteTitle}}{{/if}}</h1>
+
+                      <!-- CONTENT BODY -->
+                      <div class="welcome-body" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: rgba(255, 255, 255, 0.78); line-height: 1.6; margin-bottom: 28px;">
                         {{{content}}}
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-              <tr>
-                <td class="wrapper" align="center">
-                  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="padding-top: 40px; padding-bottom: 30px;">
-                    {{#if footerContent }}
-                      <tr>
-                        <td class="footer" style="color: rgba(255, 255, 255, 0.45); font-size: 12px; line-height: 1.5;">{{{footerContent}}}</td>
-                      </tr>
-                    {{/if}}
-                    <tr>
-                      <td class="footer" style="color: rgba(255, 255, 255, 0.4); font-size: 12px; line-height: 1.5; padding-top: 12px;">
-                        {{siteTitle}} &copy; {{year}} &mdash; {{#if unsubscribeUrl}}<a href="{{unsubscribeUrl}}" style="color: rgba(255, 255, 255, 0.6); text-decoration: underline;">{{t "Unsubscribe"}}</a>{{else}}<a href="{{managePreferencesUrl}}" style="color: rgba(255, 255, 255, 0.6); text-decoration: underline;">{{t "Manage your preferences"}}</a>{{/if}}
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-{{/emailWrapper}}
+                      </div>
+
+                      <!-- ACTION BUTTON -->
+                      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 28px;">
+                        <tr>
+                          <td>
+                            <a href="{{site.url}}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #090b10 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 700; text-decoration: none; border-radius: 12px; padding: 13px 28px; letter-spacing: -0.01em;">Access Publication Archives &rarr;</a>
+                          </td>
+                        </tr>
+                      </table>
+
+                      <!-- CONTACT DESK -->
+                      <div style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 20px;">
+                        <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.45); margin: 0 0 6px 0; line-height: 1.5;">Direct inquiries or confidential submissions:</p>
+                        <p style="font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; line-height: 1.5; margin: 0; color: #ffffff;">
+                          <a href="mailto:contact@pedohunters.help" style="color: #ffffff; text-decoration: underline; font-weight: 600;">contact@pedohunters.help</a>
+                        </p>
+                      </div>
+
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- FOOTER AREA -->
+            <tr>
+              <td align="center" style="padding-top: 32px; padding-bottom: 16px; text-align: center;">
+                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0 0 6px 0; line-height: 1.5;">
+                  Official Publication &bull; Sent from <span style="color: rgba(255, 255, 255, 0.65);">noreply@pedohunters.help</span>
+                </p>
+                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0 0 6px 0; line-height: 1.5;">
+                  Contact: <a href="mailto:contact@pedohunters.help" style="color: rgba(255, 255, 255, 0.65); text-decoration: underline;">contact@pedohunters.help</a>
+                </p>
+                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0; line-height: 1.5;">
+                  {{#if unsubscribeUrl}}
+                    <a href="{{unsubscribeUrl}}" style="color: rgba(255, 255, 255, 0.5); text-decoration: underline;">Unsubscribe</a>
+                  {{else}}
+                    <a href="{{managePreferencesUrl}}" style="color: rgba(255, 255, 255, 0.5); text-decoration: underline;">Manage email preferences</a>
+                  {{/if}}
+                </p>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
