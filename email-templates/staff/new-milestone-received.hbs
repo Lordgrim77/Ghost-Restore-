@@ -1,142 +1,82 @@
 <!doctype html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width">
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    <title>{{subject}}</title>
-
-    {{> styles}}
-    <!--[if gte mso 9]>
-    <xml>
-        <o:OfficeDocumentSettings>
-            <o:AllowPNG/>
-            <o:PixelsPerInch>96</o:PixelsPerInch>
-        </o:OfficeDocumentSettings>
-    </xml>
-    <![endif]-->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="color-scheme" content="dark">
+  <meta name="supported-color-schemes" content="dark">
+  <title>{{subject}}</title>
+  {{> styles}}
 </head>
+<body style="background-color: #08090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.6; margin: 0; padding: 0; -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%;">
+  <table border="0" cellpadding="0" cellspacing="0" class="body" style="border-collapse: separate; width: 100%; background-color: #08090b;">
+    <tr>
+      <td style="font-size: 14px; vertical-align: top;">&nbsp;</td>
+      <td class="container" style="font-size: 14px; vertical-align: top; display: block; margin: 0 auto; max-width: 580px; padding: 32px 16px; width: 100%;">
+        <div class="content" style="box-sizing: border-box; display: block; margin: 0 auto; max-width: 580px;">
 
-  <body style="background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.5em; margin: 0; padding: 0; -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%;">
-    <table border="0" cellpadding="0" cellspacing="0" class="body" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;">
-        <tr>
-            <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 14px; vertical-align: top;">&nbsp;</td>
-                <td class="container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 14px; vertical-align: top; display: block; Margin: 0 auto; max-width: 660px; padding: 10px; width: 660px;">
-                  <div class="content" style="box-sizing: border-box; display: block; Margin: 0 auto; max-width: 620px; padding: 30px 20px;">
+          <!-- PREVIEW & HEADER -->
+          {{#> preview}}
+            {{#*inline "content"}}
+              {{{content.[0]}}}
+            {{/inline}}
+          {{/preview}}
 
-                    <!-- START CENTERED CONTAINER -->
+          <!-- MAIN OBSIDIAN CARD -->
+          <table class="main" style="border-collapse: separate; width: 100%; background: #111318; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 20px; box-shadow: 0 16px 44px rgba(0, 0, 0, 0.55);">
+            <tr>
+              <td class="wrapper" style="font-size: 14px; vertical-align: top; box-sizing: border-box; padding: 38px 34px;">
+                <table border="0" cellpadding="0" cellspacing="0" style="border-collapse: separate; width: 100%;">
+                  
+                  {{#if image.url}}
+                  <tr>
+                    <td align="center" style="padding-bottom: 24px;">
+                      <img src="{{image.url}}" width="100%" alt="Milestone" style="max-width: 100%; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); display: block;" />
+                    </td>
+                  </tr>
+                  {{/if}}
 
-                    {{#> preview}}
-                        {{#*inline "content"}}
-                            {{{content.[0]}}}
-                        {{/inline}}
-                    {{/preview}}
+                  <tr>
+                    <td style="font-size: 14px; vertical-align: top;">
+                      <div style="display: inline-block; padding: 5px 12px; background: rgba(255, 255, 255, 0.08); border-radius: 20px; font-size: 12px; font-weight: 700; color: #ffffff; margin-bottom: 16px; letter-spacing: 0.05em; text-transform: uppercase;">Milestone Reached</div>
+                      <h1 style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 26px; color: #ffffff; font-weight: 800; line-height: 1.3; margin: 0 0 20px 0; letter-spacing: -0.025em;">{{{heading}}}</h1>
 
-                    <table class="main" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%; background: #ffffff; border-radius: 8px;">
+                      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 16px; color: rgba(255, 255, 255, 0.85); line-height: 1.6; margin-bottom: 28px;">
+                        {{#each content as |contentPart|}}
+                          <p style="margin: 0 0 16px 0;">{{{contentPart}}}</p>
+                        {{/each}}
+                      </div>
 
-                        <!-- START MAIN CONTENT AREA -->
+                      <!-- CTA -->
+                      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 12px;">
                         <tr>
-                            <td class="wrapper" align="center" valign="top" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 14px; vertical-align: top; box-sizing: border-box;">
-
-
-                                <!-- START LOGO -->
-                                <table class="row" style="border-collapse:collapse;border-spacing:0;display:table;padding:0;position:relative;text-align:left;vertical-align:top;width:100%">
-                                    <tbody>
-                                        <tr style="padding:0;text-align:left;vertical-align:top">
-                                            <th style="margin:0 auto;padding-bottom:48px;padding-left:0;padding-right:0;padding-top:40px;text-align:left;width:580px">
-                                                <center data-parsed="" style="min-width:580px; width:100%">
-                                                    <table border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border-spacing:0;display:table;padding:0;position:relative;text-align:left;vertical-align:top;width:60px; height: 60px;">
-                                                        <tr style="padding: 0; margin: 0;">
-                                                            <td background="https://static.ghost.org/v5.0.0/images/orb-email-head-static.png" width="60" height="60" style="width: 60px; height: 60px; padding: 0; margin: 0;"><img class="blog-logo" src="https://static.ghost.org/v5.0.0/images/orb-email-head.gif" alt="Blog Logo" width="60" height="60" style="-ms-interpolation-mode:bicubic;Margin:0 auto;border-radius:50%;clear:both;display:block;float:none;height:60px!important;margin:0 auto;max-width:100%;outline:0;text-align:center;text-decoration:none;width:60px!important" align="center"></td>
-                                                        </tr>
-                                                    </table>
-                                                </center>
-                                            </th>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                                <!-- END LOGO -->
-
-                                <!-- START FEATURE IMAGE -->
-                                <table class="row" style="border-collapse:collapse;border-spacing:0;display:table;padding:0;position:relative;text-align:left;vertical-align:top;width:100%">
-                                    <tbody>
-                                        <tr style="padding:0;text-align:left;vertical-align:top">
-                                            <th style="margin:0 auto; padding:0; padding-bottom: 48px; padding-left:0; padding-right:0; width:580px">
-                                                <center data-parsed="" style="min-width:580px;width:100%; padding: 0;">
-                                                <img class="feature-post-image" src="{{image.url}}" width="580"{{#if image.height}} height="{{image.height}}"{{/if}} align="center" style="-ms-interpolation-mode:bicubic;Margin:0 auto;border:0 none;clear:both;display:block;float:none;height:auto!important;margin:0 auto;max-width:100%;outline:0;text-align:center;text-decoration:none;width:100%!important;z-index:99;padding:0;"></center>
-                                            </th>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                                <!-- END FEATURE IMAGE -->
-
-                                <!-- END HEADER -->
-                                <table border="0" cellpadding="0" cellspacing="0" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%; max-width: 580px;">
-                                <tr>
-                                    <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 14px; vertical-align: top;">
-
-                                        <!-- BEGIN EMAIL HEADING -->
-                                        <!--[if mso]>
-                                            <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 34px; color: #242628!important; font-weight: 800; line-height: 36px; margin: 0; margin-bottom: 25px; letter-spacing: -0.019em;"><font>{{{heading}}}</font></p>
-                                        <![endif]-->
-
-                                        <!--[if !mso !vml]-->
-                                            <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 34px !important; color: #242628!important; font-weight: 800; line-height: 36px; margin: 0; margin-bottom: 25px; letter-spacing: -0.019em;"><font>{{{heading}}}</font></p>
-                                        <!--[endif]-->
-                                        <!-- END EMAIL HEADING -->
-
-                                        <!-- BEGIN EMAIL CONTENT -->
-                                        {{#each content as |contentPart|}}
-                                            <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 16px !important; color: #3A464C; font-weight: normal; margin: 0; line-height: 23px; margin-bottom: 16px;">{{{contentPart}}}</p>
-                                        {{/each}}
-                                        <!-- END EMAIL CONTENT -->
-
-                                        <!-- CTA -->
-                                        <table border="0" cellpadding="0" cellspacing="0" class="btn btn-primary" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%; box-sizing: border-box;">
-                                            <tbody>
-                                            <tr>
-                                                <td align="left" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 16px; vertical-align: top; padding-top: 32px; padding-bottom: 12px;">
-                                                <table border="0" cellpadding="0" cellspacing="0" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: auto;">
-                                                    <tbody>
-                                                    <tr>
-                                                        <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 16px; vertical-align: top; background-color: #15171A; border-radius: 5px; text-align: center;"> <a href="{{adminUrl}}" target="_blank" style="display: inline-block; color: #ffffff; background-color: #15171A; border: solid 1px #15171A; border-radius: 5px; box-sizing: border-box; cursor: pointer; text-decoration: none; font-size: 16px !important; font-weight: normal; margin: 0; padding: 9px 22px 10px; border-color: #15171A;">{{ctaText}}</a></td>
-                                                    </tr>
-                                                    </tbody>
-                                                </table>
-                                                </td>
-                                            </tr>
-                                            </tbody>
-                                        </table>
-
-                                        <p style="word-break: break-all; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 15px; line-height: 25px; margin-top:0; color: #3A464C;"></p>
-                            </td>
+                          <td>
+                            <a href="{{adminUrl}}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #090b10 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 700; text-decoration: none; border-radius: 12px; padding: 13px 28px; letter-spacing: -0.01em;">{{ctaText}} &rarr;</a>
+                          </td>
                         </tr>
+                      </table>
 
-                        <!-- START FOOTER -->
-                        <tr>
-                            <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 14px; vertical-align: top; padding-top: 80px;">
-                            <p class="small" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; line-height: 18px; font-size: 11px; color: #738A94; font-weight: normal; margin: 0; margin-bottom: 2px;">This message was sent from <a class="small" href="{{siteUrl}}" style="text-decoration: underline; color: #738A94; font-size: 11px;">{{siteDomain}}</a> to <a class="small" href="mailto:{{toEmail}}" style="text-decoration: underline; color: #738A94; font-size: 11px;">{{toEmail}}</a></p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 14px; vertical-align: top; padding-top: 2px">
-                                <p class="small" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; line-height: 18px; font-size: 11px; color: #738A94; font-weight: normal; margin: 0; margin-bottom: 2px;">Don’t want to receive these emails? Manage your preferences <a class="small" href="{{staffUrl}}" style="text-decoration: underline; color: #738A94; font-size: 11px;">here</a>.</p>
-                            </td>
-                        </tr>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
 
-                    <!-- END FOOTER -->
-                    </table>
+          <!-- FOOTER -->
+          <table border="0" cellpadding="0" cellspacing="0" width="100%" style="padding-top: 28px; text-align: center;">
+            <tr>
+              <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; vertical-align: top; text-align: center;">
+                <p class="small" style="line-height: 18px; font-size: 12px; color: rgba(255, 255, 255, 0.4); margin: 0 0 6px 0;">This message was sent from <a class="small" href="{{siteUrl}}" style="text-decoration: underline; color: rgba(255, 255, 255, 0.65); font-size: 12px;">{{siteDomain}}</a> to <span style="color: rgba(255, 255, 255, 0.65);">{{toEmail}}</span></p>
+                <p class="small" style="line-height: 18px; font-size: 12px; color: rgba(255, 255, 255, 0.4); margin: 0;"><a class="small" href="{{staffUrl}}" style="text-decoration: underline; color: rgba(255, 255, 255, 0.65); font-size: 12px;">Manage notification preferences</a></p>
+              </td>
+            </tr>
+          </table>
 
-                            <!-- END MAIN CONTENT AREA -->
-                            </td>
-                        </tr>
-                    </table>
-
-                    <!-- END CENTERED CONTAINER -->
-                    </div>
-                </td>
-            <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; font-size: 14px; vertical-align: top;">&nbsp;</td>
-        </tr>
-    </table>
-
+        </div>
+      </td>
+      <td style="font-size: 14px; vertical-align: top;">&nbsp;</td>
+    </tr>
+  </table>
 </body>
 </html>

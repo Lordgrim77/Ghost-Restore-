@@ -1,6 +1,6 @@
 <style>
   /* -------------------------------------
-      RESPONSIVE AND MOBILE FRIENDLY STYLES
+      OBSIDIAN MONOCHROME THEME STYLES
   ------------------------------------- */
   @media only screen and (max-width: 620px) {
     table.body h1 {
@@ -13,11 +13,11 @@
     table.body td,
     table.body span,
     table.body a {
-      font-size: 16px !important;
+      font-size: 15px !important;
     }
     table.body .wrapper,
     table.body .article {
-      padding: 10px !important;
+      padding: 16px !important;
     }
     table.body .content {
       padding: 0 !important;
@@ -27,9 +27,8 @@
       width: 100% !important;
     }
     table.body .main {
-      border-left-width: 0 !important;
-      border-radius: 0 !important;
-      border-right-width: 0 !important;
+      border-radius: 16px !important;
+      padding: 24px 18px !important;
     }
     table.body .img-responsive {
       height: auto !important;
@@ -38,19 +37,24 @@
     }
     table.body p.large,
     table.body p.large a {
-      font-size: 18px !important;
+      font-size: 17px !important;
     }
     table.body p.small,
     table.body a.small {
       font-size: 12px !important;
     }
+    .btn a,
+    a.btn-cta {
+      display: block !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      text-align: center !important;
+    }
     .new-mention-thumbnail {
       display: none !important;
     }
   }
-  /* -------------------------------------
-      PRESERVE THESE STYLES IN THE HEAD
-  ------------------------------------- */
+
   @media all {
     .ExternalClass {
       width: 100%;
@@ -63,7 +67,6 @@
     .ExternalClass div {
       line-height: 100%;
     }
-    /* Reset styles for Gmail (it wraps email address in link with custom styles) */
     .text-link a {
       color: inherit !important;
       font-family: inherit !important;
@@ -88,59 +91,34 @@
       line-height: inherit;
     }
   }
+
   hr {
     border-width: 0;
     height: 0;
-    margin-top: 34px;
-    margin-bottom: 34px;
+    margin-top: 28px;
+    margin-bottom: 28px;
     border-bottom-width: 1px;
-    border-bottom-color: rgba(255, 255, 255, 0.1);
+    border-bottom-color: rgba(255, 255, 255, 0.08);
   }
+
   body, table.body, .body {
     background-color: #08090b !important;
+    color: rgba(255, 255, 255, 0.88) !important;
   }
-  table.main {
+
+  .main {
     background: #111318 !important;
     border: 1px solid rgba(255, 255, 255, 0.12) !important;
     border-radius: 20px !important;
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.55) !important;
   }
-  table.body h1 {
+
+  h1 {
     color: #ffffff !important;
+    letter-spacing: -0.025em !important;
   }
-  table.body p {
-    color: rgba(255, 255, 255, 0.74) !important;
-  }
-  table.body p.small,
-  table.body a.small {
-    color: rgba(255, 255, 255, 0.42) !important;
-  }
+
   a {
     color: #ffffff !important;
-  }
-  blockquote {
-    margin-left: 0;
-    padding-left: 20px;
-    border-left: 3px solid rgba(255, 255, 255, 0.3);
-    color: rgba(255, 255, 255, 0.8);
-  }
-  .btn a,
-  table.btn a {
-    background-color: #ffffff !important;
-    color: #000000 !important;
-    border-radius: 9999px !important;
-    font-weight: 700 !important;
-    border: 1px solid #ffffff !important;
-  }
-  .btn td,
-  table.btn td {
-    background-color: transparent !important;
-    border-radius: 9999px !important;
-  }
-  .recommendation-card--outlook {
-	margin: 0;
-    padding: 0;
-    width: 100%;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.04);
   }
 </style>
