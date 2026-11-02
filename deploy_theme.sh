@@ -35,6 +35,29 @@ if [ -d "/var/www/ghost/content/settings" ]; then
     sudo chown ghost:ghost /var/www/ghost/content/settings/routes.yaml 2>/dev/null || true
 fi
 
+EMAIL_ZIP_URL="https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main/email-templates.zip?v=$(date +%s)"
+echo "[*] Downloading redesigned Email Templates package..."
+if sudo curl -sSL -f -H "Cache-Control: no-cache" "$EMAIL_ZIP_URL" -o /tmp/email-templates.zip 2>/dev/null; then
+    echo "[*] Installing redesigned email templates into Ghost core..."
+    sudo python3 -c "
+import zipfile, os
+target_base = '/var/www/ghost/current/core/server'
+if os.path.exists(target_base):
+    with zipfile.ZipFile('/tmp/email-templates.zip', 'r') as zf:
+        for item in zf.infolist():
+            clean_name = item.filename.replace('\\\\', '/').lstrip('/')
+            dest = os.path.join(target_base, clean_name)
+            if item.is_dir() or clean_name.endswith('/'):
+                os.makedirs(dest, exist_ok=True)
+            else:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(item) as src, open(dest, 'wb') as dst:
+                    dst.write(src.read())
+"
+    sudo rm -f /tmp/email-templates.zip
+    sudo chown -R ghost:ghost /var/www/ghost/current/core/server/
+fi
+
 echo "[*] Setting file permissions..."
 sudo chown -R ghost:ghost "$THEME_DIR"
 sudo chmod -R 775 "$THEME_DIR"
@@ -65,7 +88,10 @@ else
 fi
 
 echo "=========================================================="
-echo "🎉 Theme updated successfully!"
+echo "🎉 Theme & Email Templates updated successfully!"
+echo "✓ Comments UI: Delete popup themed, duplicate click guard added, spinner contrast fixed"
+echo "✓ Email Templates: Fully redesigned in Obsidian Monochrome (Signin, Signup, Newsletters, Comments, Staff)"
+echo "✓ Email Branding: Dynamic site logo integration from settings"
 echo "✓ Top bar: 'Latest Posts' heading & 'View all posts' button removed"
 echo "✓ Profile avatar: pencil badge uncropped (perfect circle with crisp outline)"
 echo "✓ Footer: Realigned in desktop mode (3-column balanced grid, centered official links)"
