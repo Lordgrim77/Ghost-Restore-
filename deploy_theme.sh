@@ -74,8 +74,11 @@ echo "[*] Setting file permissions..."
 sudo chown -R ghost:ghost "$THEME_DIR"
 sudo chmod -R 775 "$THEME_DIR"
 
-echo "[*] Ensuring Ghost MySQL accent color is pure white (#ffffff)..."
-sudo mysql -e "UPDATE ghost_production.settings SET value = '#ffffff' WHERE key = 'accent_color';" 2>/dev/null || true
+echo "[*] Ensuring Ghost MySQL accent color is pure white (#ffffff) and members signup access is open..."
+sudo mysql -e "
+UPDATE ghost_production.settings SET value = '#ffffff' WHERE key = 'accent_color';
+UPDATE ghost_production.settings SET value = 'all' WHERE key = 'members_signup_access';
+" 2>/dev/null || true
 
 echo "[*] Ensuring Open Graph, Twitter card, and Cover images use obsidian social card..."
 sudo mysql -e "
