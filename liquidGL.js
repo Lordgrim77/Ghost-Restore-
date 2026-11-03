@@ -18,7 +18,14 @@
   let renderFrame = 0;
   let renderRaf = null;
   let stopSync = null;
-  const renderAll = () => window.__liquidGLRenderer__?.render();
+  const renderAll = () => {
+    for (const r of renderers) {
+      if (!r._destroyed && !r._tearingDown) {
+        r.render();
+        break;
+      }
+    }
+  };
   const startRendering = () => {
     if (renderRaf !== null || stopSync || !renderers.size) return;
     const loop = () => {
@@ -3140,12 +3147,17 @@
           final.rgb = mix(final.rgb, final.rgb * u_tint.rgb, u_tint.a);
 
           if (u_specular) {
-            vec2 lp1 = vec2(sin(u_time*0.2), cos(u_time*0.3))*0.6 + 0.5;
-            vec2 lp2 = vec2(sin(u_time*-0.4+1.5), cos(u_time*0.25-0.5))*0.6 + 0.5;
+            vec2 lp1 = vec2(sin(u_time * 0.65), cos(u_time * 0.85)) * 0.55 + 0.5;
+            vec2 lp2 = vec2(sin(u_time * -0.7 + 1.5), cos(u_time * 0.6 - 0.5)) * 0.55 + 0.5;
             float h = 0.0;
-            h += smoothstep(0.4,0.0,distance((p_px + b_px) / u_boxSize, lp1))*0.1;
-            h += smoothstep(0.5,0.0,distance((p_px + b_px) / u_boxSize, lp2))*0.08;
-            final.rgb += h;
+            h += smoothstep(0.42, 0.0, distance((p_px + b_px) / u_boxSize, lp1)) * 0.22;
+            h += smoothstep(0.48, 0.0, distance((p_px + b_px) / u_boxSize, lp2)) * 0.18;
+            if (u_interactionRadius > 0.0) {
+              vec2 cursorLp = vec2(u_interaction.x, 1.0 - u_interaction.y);
+              float cursorDist = distance((p_px + b_px) / u_boxSize, cursorLp);
+              h += smoothstep(0.38, 0.0, cursorDist) * 0.35;
+            }
+            final.rgb += h * edge;
           }
 
           if (u_revealType == 1) {
@@ -3917,12 +3929,17 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
   finalCol = vec4<f32>(mix(finalCol.rgb, finalCol.rgb * u.tint.rgb, u.tint.a), finalCol.a);
 
   if (u.specular > 0.5) {
-    let lp1 = vec2<f32>(sin(u.time * 0.2), cos(u.time * 0.3)) * 0.6 + vec2<f32>(0.5);
-    let lp2 = vec2<f32>(sin(u.time * -0.4 + 1.5), cos(u.time * 0.25 - 0.5)) * 0.6 + vec2<f32>(0.5);
+    let lp1 = vec2<f32>(sin(u.time * 0.65), cos(u.time * 0.85)) * 0.55 + vec2<f32>(0.5);
+    let lp2 = vec2<f32>(sin(u.time * -0.7 + 1.5), cos(u.time * 0.6 - 0.5)) * 0.55 + vec2<f32>(0.5);
     var h = 0.0;
-    h = h + smoothstep(0.4, 0.0, distance((p_px + b_px) / u.boxSize, lp1)) * 0.1;
-    h = h + smoothstep(0.5, 0.0, distance((p_px + b_px) / u.boxSize, lp2)) * 0.08;
-    finalCol = vec4<f32>(finalCol.rgb + vec3<f32>(h), finalCol.a);
+    h = h + smoothstep(0.42, 0.0, distance((p_px + b_px) / u.boxSize, lp1)) * 0.22;
+    h = h + smoothstep(0.48, 0.0, distance((p_px + b_px) / u.boxSize, lp2)) * 0.18;
+    if (u.interactionRadius > 0.0) {
+      let cursorLp = vec2<f32>(u.interaction.x, 1.0 - u.interaction.y);
+      let cursorDist = distance((p_px + b_px) / u.boxSize, cursorLp);
+      h = h + smoothstep(0.38, 0.0, cursorDist) * 0.35;
+    }
+    finalCol = vec4<f32>(finalCol.rgb + vec3<f32>(h * edge), finalCol.a);
   }
 
   if (u.revealType == 1.0) {
@@ -6315,7 +6332,10 @@ fn fs() -> @location(0) vec4<f32> {
           meta && (meta._animating || meta.needsRecapture || meta._capturing)
         );
       });
-      if (this.lenses.some((l) => l.options.specular)) {
+      if (this.lenses.some((l) => l.options.specular || l.options.interaction === "fluid")) {
+        animated = true;
+      }
+      if (this._bgCanvas || document.getElementById("gm-cyber-hex-canvas")) {
         animated = true;
       }
       const signature = JSON.stringify(state);
@@ -6372,6 +6392,7 @@ fn fs() -> @location(0) vec4<f32> {
         this._contentLayers.length > 0 || lower.length > 0,
       );
 
+      this._updateDynamicBackground();
       if (this._updateDynamicVideos() !== false) this._updateDynamicNodes();
 
       this._frameSnapRect = this.snapshotTarget.getBoundingClientRect();
@@ -6590,6 +6611,13 @@ fn fs() -> @location(0) vec4<f32> {
       const settle = 1 - Math.exp(-dt / (80 + viscosity * 620));
       let dx = 0,
         dy = 0;
+      const str = unitOption(options.interactionStrength, 0.5, 5);
+      // Ambient harmonic surface undulation (continuous micro-wave so glass never freezes)
+      const phase = ((rect.left || 0) * 0.009 + (rect.top || 0) * 0.006);
+      const ambientMag = (inside ? 0.016 : 0.007) * str;
+      const ambX = Math.sin(now * 0.0022 + phase) * ambientMag;
+      const ambY = Math.cos(now * 0.0019 + phase * 1.3) * ambientMag;
+
       if (inside) {
         if (!state.inside && Math.hypot(value[2], value[3]) < 0.0001) {
           value[0] = x;
@@ -6600,22 +6628,24 @@ fn fs() -> @location(0) vec4<f32> {
         const speed = Math.hypot(pointer.vx, pointer.vy);
         const amount =
           Math.min(size * 0.12, speed * 45) *
-          unitOption(options.interactionStrength, 0.5, 5) *
+          str *
           Math.exp(-Math.max(0, now - pointer.time) / 70);
         if (speed > 0) {
           dx = ((pointer.vx / speed) * amount) / rect.width;
           dy = ((pointer.vy / speed) * amount) / rect.height;
         }
+      } else {
+        value[0] += (0.5 - value[0]) * follow;
+        value[1] += (0.5 - value[1]) * follow;
       }
+      dx += ambX;
+      dy += ambY;
+
       const easing =
         Math.hypot(dx, dy) > Math.hypot(value[2], value[3]) ? follow : settle;
       value[2] += (dx - value[2]) * easing;
       value[3] += (dy - value[3]) * easing;
-      if (
-        unitOption(options.interactionStrength, 0.5, 5) === 0 ||
-        Math.hypot(value[2], value[3]) < 0.00001
-      )
-        value[2] = value[3] = 0;
+      if (str === 0) value[2] = value[3] = 0;
       state.inside = inside;
       return value;
     }
@@ -6978,6 +7008,56 @@ fn fs() -> @location(0) vec4<f32> {
       } catch (e) {
         this._videoFadeFailed = true;
         return false;
+      }
+    }
+
+    _updateDynamicBackground() {
+      if (!this.hasTexture || !this.backend || !this.textureWidth) return;
+      const hexCanvas = this._bgCanvas || (this._bgCanvas = document.getElementById("gm-cyber-hex-canvas"));
+      if (!hexCanvas || hexCanvas.width === 0 || hexCanvas.height === 0) return;
+
+      const snapRect = this.snapshotTarget.getBoundingClientRect();
+      const sampleAreas = this._videoSampleAreas;
+      if (!sampleAreas || !sampleAreas.length) return;
+
+      if (!this._bgTmpCanvas) {
+        this._bgTmpCanvas = document.createElement("canvas");
+        this._bgTmpCtx = this._bgTmpCanvas.getContext("2d", { alpha: true });
+      }
+
+      const canvasW = hexCanvas.width;
+      const canvasH = hexCanvas.height;
+      const scale = this.scaleFactor || 1;
+
+      for (let i = 0; i < sampleAreas.length; i++) {
+        const area = sampleAreas[i];
+        const sx = Math.max(0, Math.floor(area.left));
+        const sy = Math.max(0, Math.floor(area.top));
+        const sw = Math.min(canvasW - sx, Math.ceil(area.width));
+        const sh = Math.min(canvasH - sy, Math.ceil(area.height));
+        if (sw <= 0 || sh <= 0) continue;
+
+        const dstX = Math.round((area.left - snapRect.left) * scale);
+        const dstY = Math.round((area.top - snapRect.top) * scale);
+        const dstW = Math.round(area.width * scale);
+        const dstH = Math.round(area.height * scale);
+
+        if (dstW <= 0 || dstH <= 0 || dstX < 0 || dstY < 0) continue;
+        if (dstX + dstW > this.textureWidth || dstY + dstH > this.textureHeight) continue;
+
+        if (this._bgTmpCanvas.width !== dstW || this._bgTmpCanvas.height !== dstH) {
+          this._bgTmpCanvas.width = dstW;
+          this._bgTmpCanvas.height = dstH;
+        }
+
+        try {
+          this._bgTmpCtx.clearRect(0, 0, dstW, dstH);
+          if (this.staticSnapshotCanvas) {
+            this._bgTmpCtx.drawImage(this.staticSnapshotCanvas, dstX, dstY, dstW, dstH, 0, 0, dstW, dstH);
+          }
+          this._bgTmpCtx.drawImage(hexCanvas, sx, sy, sw, sh, 0, 0, dstW, dstH);
+          this.backend.uploadRegion(dstX, dstY, this._bgTmpCanvas);
+        } catch(e) {}
       }
     }
 
