@@ -14,6 +14,8 @@ Features:
 
 import os
 import sys
+import re
+import html
 import json
 import uuid
 import secrets
@@ -231,10 +233,30 @@ class SupportVault:
             "created_at": now
         }
 
+    def _candidate_dbs(self) -> List[str]:
+        candidates = [
+            self.db_path,
+            "/var/www/ghost/support_vault/support_cases.db",
+            "/opt/ghost-telegram-bot/support_vault/support_cases.db",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "support_vault", "support_cases.db")
+        ]
+        res = []
+        seen = set()
+        for c in candidates:
+            if c not in seen and os.path.exists(c) and os.path.isfile(c):
+                seen.add(c)
+                res.append(c)
+        if not res:
+            res.append(self.db_path)
+        return res
+
     def save_evidence(self, case_code: str, filename: str, data: bytes, mime_type: Optional[str] = None) -> Dict[str, Any]:
         clean_data = sanitize_media(filename, data)
         sha256 = hashlib.sha256(clean_data).hexdigest()
-        clean_name = os.path.basename(filename).replace(" ", "_")
+        raw_name = os.path.basename(filename)
+        clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_name)
+        if not clean_name or clean_name.startswith('.'):
+            clean_name = f"evidence_{clean_name}"
         stored_name = f"{case_code}_{uuid.uuid4().hex[:8]}_{clean_name}"
         stored_path = os.path.join(self.evidence_dir, stored_name)
 
@@ -282,58 +304,75 @@ class SupportVault:
         return None
 
     def get_case(self, case_code: str) -> Optional[Dict[str, Any]]:
-        with self._get_conn() as conn:
-            row = conn.execute("SELECT * FROM cases WHERE case_code = ?", (case_code,)).fetchone()
-            if not row:
-                return None
-            case_data = dict(row)
-
-            # Files
-            files = conn.execute("SELECT * FROM evidence_files WHERE case_code = ?", (case_code,)).fetchall()
-            case_data["files"] = [dict(f) for f in files]
-
-            # Messages
-            msgs = conn.execute("SELECT * FROM messages WHERE case_code = ? ORDER BY id ASC", (case_code,)).fetchall()
-            case_data["messages"] = [dict(m) for m in msgs]
-
-            # Audit
-            audit = conn.execute("SELECT * FROM audit_logs WHERE case_code = ? ORDER BY id ASC", (case_code,)).fetchall()
-            case_data["audit_logs"] = [dict(a) for a in audit]
-
-            return case_data
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT * FROM cases WHERE case_code = ?", (case_code,)).fetchone()
+                    if row:
+                        case_data = dict(row)
+                        files = conn.execute("SELECT * FROM evidence_files WHERE case_code = ?", (case_code,)).fetchall()
+                        case_data["files"] = [dict(f) for f in files]
+                        msgs = conn.execute("SELECT * FROM messages WHERE case_code = ? ORDER BY id ASC", (case_code,)).fetchall()
+                        case_data["messages"] = [dict(m) for m in msgs]
+                        audit = conn.execute("SELECT * FROM audit_logs WHERE case_code = ? ORDER BY id ASC", (case_code,)).fetchall()
+                        case_data["audit_logs"] = [dict(a) for a in audit]
+                        return case_data
+            except Exception:
+                pass
+        return None
 
     def update_status(self, case_code: str, new_status: str, actor: str, note: Optional[str] = None) -> bool:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE cases SET status = ?, resolution_note = ?, updated_at = ? WHERE case_code = ?",
-                (new_status, note, now, case_code)
-            )
-            conn.execute(
-                "INSERT INTO audit_logs (case_code, action, actor, details, timestamp) VALUES (?, ?, ?, ?, ?)",
-                (case_code, "STATUS_CHANGE", actor, f"Changed to {new_status}. Note: {note or 'None'}", now)
-            )
-            conn.commit()
-        return True
+        updated = False
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT 1 FROM cases WHERE case_code = ?", (case_code,)).fetchone()
+                    if row:
+                        conn.execute(
+                            "UPDATE cases SET status = ?, resolution_note = ?, updated_at = ? WHERE case_code = ?",
+                            (new_status, note, now, case_code)
+                        )
+                        conn.execute(
+                            "INSERT INTO audit_logs (case_code, action, actor, details, timestamp) VALUES (?, ?, ?, ?, ?)",
+                            (case_code, "STATUS_CHANGE", actor, f"Changed to {new_status}. Note: {note or 'None'}", now)
+                        )
+                        conn.commit()
+                        updated = True
+            except Exception:
+                pass
+        return updated
 
     def set_telegram_message_id(self, case_code: str, message_id: int):
-        with self._get_conn() as conn:
-            conn.execute("UPDATE cases SET telegram_message_id = ? WHERE case_code = ?", (message_id, case_code))
-            conn.commit()
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.execute("UPDATE cases SET telegram_message_id = ? WHERE case_code = ?", (message_id, case_code))
+                    conn.commit()
+            except Exception:
+                pass
 
     def add_message(self, case_code: str, sender_type: str, sender_name: str, text: str) -> Dict[str, Any]:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        with self._get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO messages (case_code, sender_type, sender_name, message_text, created_at) VALUES (?, ?, ?, ?, ?)",
-                (case_code, sender_type, sender_name, text, now)
-            )
-            conn.execute("UPDATE cases SET updated_at = ? WHERE case_code = ?", (now, case_code))
-            conn.commit()
-            msg_id = cur.lastrowid
+        msg_id = None
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    cur = conn.execute(
+                        "INSERT INTO messages (case_code, sender_type, sender_name, message_text, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (case_code, sender_type, sender_name, text, now)
+                    )
+                    conn.execute("UPDATE cases SET updated_at = ? WHERE case_code = ?", (now, case_code))
+                    conn.commit()
+                    if msg_id is None:
+                        msg_id = cur.lastrowid
+            except Exception:
+                pass
 
         return {
-            "id": msg_id,
+            "id": msg_id or 1,
             "case_code": case_code,
             "sender_type": sender_type,
             "sender_name": sender_name,
@@ -342,9 +381,22 @@ class SupportVault:
         }
 
     def list_recent_cases(self, limit: int = 15) -> List[Dict[str, Any]]:
-        with self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM cases ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-            return [dict(r) for r in rows]
+        seen_codes = set()
+        all_cases = []
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute("SELECT * FROM cases ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+                    for r in rows:
+                        d = dict(r)
+                        if d["case_code"] not in seen_codes:
+                            seen_codes.add(d["case_code"])
+                            all_cases.append(d)
+            except Exception:
+                pass
+        all_cases.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+        return all_cases[:limit]
 
 
 # =========================================================================
@@ -415,32 +467,45 @@ class SupportBotBridge:
             "REJECTED": "⚪ REJECTED / DISMISSED"
         }
 
+        raw_priority = str(case_data.get('priority') or 'STANDARD').upper()
+        raw_status = str(case_data.get('status') or 'SUBMITTED').upper()
+        p_display = priority_emojis.get(raw_priority, raw_priority)
+        s_display = status_emojis.get(raw_status, raw_status)
+
+        import html
         files = case_data.get("files", [])
         files_text = f"📁 <b>Evidence:</b> {len(files)} file(s) attached\n"
         for f in files[:4]:
-            files_text += f"   • <code>{f['original_name']}</code> ({f['file_size'] // 1024} KB | SHA: <code>{f['sha256_hash'][:12]}...</code>)\n"
+            orig_name = html.escape(str(f.get('original_name') or 'evidence.bin'))
+            size_kb = (f.get('file_size') or 0) // 1024
+            sha_snip = html.escape(str(f.get('sha256_hash') or '')[:12])
+            files_text += f"   • <code>{orig_name}</code> ({size_kb} KB | SHA: <code>{sha_snip}...</code>)\n"
         if len(files) > 4:
             files_text += f"   <i>...and {len(files) - 4} more attachment(s)</i>\n"
 
-        p_display = priority_emojis.get(case_data['priority'].upper(), case_data['priority'])
-        s_display = status_emojis.get(case_data['status'].upper(), case_data['status'])
+        category = html.escape(str(case_data.get('category') or 'Incident Report'))
+        subject = html.escape(str(case_data.get('subject') or 'No Subject'))
+        desc = html.escape(str(case_data.get('description') or ''))[:600]
+        reporter = html.escape(str(case_data.get('reporter_alias') or 'Anonymous'))
+        ip_hash = html.escape(str(case_data.get('ip_hash') or 'N/A')[:10])
+        created_at = str(case_data.get('created_at') or '')[:19].replace('T', ' ')
 
         note_text = ""
         if case_data.get("resolution_note"):
-            note_text = f"📋 <b>Determination Note:</b>\n<blockquote>{case_data['resolution_note']}</blockquote>\n"
+            clean_note = html.escape(str(case_data['resolution_note']))
+            note_text = f"📋 <b>Determination Note:</b>\n<blockquote>{clean_note}</blockquote>\n"
 
         return (
             f"🚨 <b>INCIDENT REPORT: #{case_data['case_code']}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📌 <b>Category:</b> {case_data['category']}\n"
+            f"📌 <b>Category:</b> {category}\n"
             f"⚡ <b>Priority:</b> {p_display}\n"
-            f"🕒 <b>Submitted:</b> {case_data['created_at'][:19].replace('T', ' ')} UTC\n"
-            f"👤 <b>Reporter:</b> {case_data.get('reporter_alias', 'Anonymous')} "
-            f"[Hash: <code>{case_data.get('ip_hash', 'N/A')[:10]}</code>]\n"
+            f"🕒 <b>Submitted:</b> {created_at} UTC\n"
+            f"👤 <b>Reporter:</b> {reporter} [Hash: <code>{ip_hash}</code>]\n"
             f"{files_text}\n"
-            f"📝 <b>Subject:</b> {case_data['subject']}\n"
+            f"📝 <b>Subject:</b> {subject}\n"
             f"📄 <b>Description:</b>\n"
-            f"<blockquote>{case_data['description'][:600]}</blockquote>\n"
+            f"<blockquote>{desc}</blockquote>\n"
             f"{note_text}"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Status: <b>{s_display}</b>"
@@ -496,73 +561,159 @@ class SupportBotBridge:
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        try:
+            await query.answer()
+        except Exception:
+            pass
 
         data = query.data or ""
         action, _, case_code = data.partition(":")
-        case_data = self.vault.get_case(case_code)
-        if not case_data:
-            await query.edit_message_text(f"❌ Case #{case_code} not found.")
-            return
 
-        admin_user = query.from_user.username or query.from_user.first_name or "Administrator"
-
-        if action == "case_view":
-            text = self.format_case_card(case_data)
-            kb = self.make_case_keyboard(case_code, case_data["status"])
-            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
-
-        elif action == "case_review":
-            self.vault.update_status(case_code, "IN_REVIEW", actor=admin_user)
-            case_data["status"] = "IN_REVIEW"
-            text = self.format_case_card(case_data)
-            kb = self.make_case_keyboard(case_code, "IN_REVIEW")
-            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
-            await query.message.reply_text(f"🔍 Case <b>#{case_code}</b> marked as <b>IN REVIEW</b> by @{admin_user}.", parse_mode=ParseMode.HTML)
-
-        elif action == "case_close":
-            self.vault.update_status(case_code, "CLOSED", actor=admin_user, note="Resolved by investigation team.")
-            case_data["status"] = "CLOSED"
-            text = self.format_case_card(case_data)
-            kb = self.make_case_keyboard(case_code, "CLOSED")
-            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
-            await query.message.reply_text(f"✅ Case <b>#{case_code}</b> has been marked as <b>CLOSED / RESOLVED</b>.", parse_mode=ParseMode.HTML)
-
-        elif action == "case_reject":
-            self.vault.update_status(case_code, "REJECTED", actor=admin_user, note="Dismissed or insufficient evidence.")
-            case_data["status"] = "REJECTED"
-            text = self.format_case_card(case_data)
-            kb = self.make_case_keyboard(case_code, "REJECTED")
-            await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
-            await query.message.reply_text(f"❌ Case <b>#{case_code}</b> has been marked as <b>REJECTED / DISMISSED</b>.", parse_mode=ParseMode.HTML)
-
-        elif action == "case_evidence":
-            files = case_data.get("files", [])
-            if not files:
-                await query.message.reply_text(f"ℹ️ No evidence files attached to #{case_code}.")
+        try:
+            case_data = self.vault.get_case(case_code)
+            if not case_data:
+                try:
+                    await query.answer(f"❌ Case #{case_code} not found in secure vault.", show_alert=True)
+                except Exception:
+                    pass
+                try:
+                    await query.edit_message_text(f"❌ Case #{case_code} not found.")
+                except Exception:
+                    pass
                 return
-            await query.message.reply_text(f"📥 Sending {len(files)} evidence attachment(s) for #{case_code}...")
-            for f in files:
-                stored_path = self.vault.get_evidence_path(f["stored_filename"])
-                if stored_path and os.path.exists(stored_path):
-                    with open(stored_path, "rb") as fp:
-                        caption = (
-                            f"📁 <b>{f['original_name']}</b>\n"
-                            f"Size: {f['file_size'] // 1024} KB\n"
-                            f"SHA-256: <code>{f['sha256_hash']}</code>"
-                        )
-                        await query.message.reply_document(document=fp, filename=f["original_name"], caption=caption, parse_mode=ParseMode.HTML)
-                else:
-                    await query.message.reply_text(f"⚠️ Evidence file {f['original_name']} missing on disk.")
 
-        elif action == "case_reply":
-            self.active_reply_sessions[query.from_user.id] = case_code
-            await query.message.reply_text(
-                f"💬 <b>Reply Mode Active for #{case_code}</b>\n"
-                f"Please type your message below. It will be delivered directly to the reporter's live web portal.\n"
-                f"<i>(Send /cancel to abort)</i>",
-                parse_mode=ParseMode.HTML
-            )
+            admin_user = query.from_user.username or query.from_user.first_name or "Administrator"
+
+            if action == "case_view":
+                text = self.format_case_card(case_data)
+                kb = self.make_case_keyboard(case_code, case_data.get("status", "SUBMITTED"))
+                try:
+                    await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        raise
+
+            elif action == "case_review":
+                self.vault.update_status(case_code, "IN_REVIEW", actor=admin_user)
+                case_data["status"] = "IN_REVIEW"
+                text = self.format_case_card(case_data)
+                kb = self.make_case_keyboard(case_code, "IN_REVIEW")
+                try:
+                    await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        pass
+                await query.message.reply_text(
+                    f"🔍 Case <b>#{html.escape(case_code)}</b> marked as <b>IN REVIEW</b> by @{html.escape(admin_user)}.",
+                    parse_mode=ParseMode.HTML
+                )
+
+            elif action == "case_close":
+                self.vault.update_status(case_code, "CLOSED", actor=admin_user, note="Resolved by investigation team.")
+                case_data["status"] = "CLOSED"
+                text = self.format_case_card(case_data)
+                kb = self.make_case_keyboard(case_code, "CLOSED")
+                try:
+                    await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        pass
+                await query.message.reply_text(
+                    f"✅ Case <b>#{html.escape(case_code)}</b> has been marked as <b>CLOSED / RESOLVED</b>.",
+                    parse_mode=ParseMode.HTML
+                )
+
+            elif action == "case_reject":
+                self.vault.update_status(case_code, "REJECTED", actor=admin_user, note="Dismissed or insufficient evidence.")
+                case_data["status"] = "REJECTED"
+                text = self.format_case_card(case_data)
+                kb = self.make_case_keyboard(case_code, "REJECTED")
+                try:
+                    await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        pass
+                await query.message.reply_text(
+                    f"❌ Case <b>#{html.escape(case_code)}</b> has been marked as <b>REJECTED / DISMISSED</b>.",
+                    parse_mode=ParseMode.HTML
+                )
+
+            elif action == "case_evidence":
+                files = case_data.get("files", [])
+                if not files:
+                    try:
+                        await query.answer("ℹ️ No evidence files attached to this case.", show_alert=True)
+                    except Exception:
+                        pass
+                    await query.message.reply_text(f"ℹ️ No evidence files attached to #{html.escape(case_code)}.", parse_mode=ParseMode.HTML)
+                    return
+
+                try:
+                    await query.answer(f"📥 Sending {len(files)} attachment(s)...")
+                except Exception:
+                    pass
+
+                sent_count = 0
+                for f in files:
+                    stored_name = f.get("stored_filename", "")
+                    stored_path = self.vault.get_evidence_path(stored_name)
+                    if stored_path and os.path.exists(stored_path):
+                        clean_fname = html.escape(str(f.get("original_name") or "evidence.bin"))
+                        sha = html.escape(str(f.get("sha256_hash") or "")[:16])
+                        size_kb = (f.get("file_size") or 0) // 1024
+                        caption = (
+                            f"📁 <b>{clean_fname}</b>\n"
+                            f"Size: {size_kb} KB\n"
+                            f"SHA-256: <code>{sha}</code>"
+                        )
+                        with open(stored_path, "rb") as fp:
+                            file_data = fp.read()
+                        await query.message.reply_document(
+                            document=file_data,
+                            filename=f.get("original_name") or "evidence.bin",
+                            caption=caption,
+                            parse_mode=ParseMode.HTML
+                        )
+                        sent_count += 1
+                    else:
+                        missing_name = html.escape(str(f.get("original_name") or stored_name or "Unknown"))
+                        await query.message.reply_text(
+                            f"⚠️ Evidence file <code>{missing_name}</code> missing from disk storage.",
+                            parse_mode=ParseMode.HTML
+                        )
+
+                if sent_count > 0:
+                    await query.message.reply_text(
+                        f"✅ Delivered <b>{sent_count}</b> evidence file(s) for case <b>#{html.escape(case_code)}</b>.",
+                        parse_mode=ParseMode.HTML
+                    )
+
+            elif action == "case_reply":
+                self.active_reply_sessions[query.from_user.id] = case_code
+                try:
+                    await query.answer("💬 Reply Mode Active! Type your message.")
+                except Exception:
+                    pass
+                await query.message.reply_text(
+                    f"💬 <b>Reply Mode Active for #{html.escape(case_code)}</b>\n"
+                    f"Please type your message below. It will be delivered directly to the reporter's live web portal.\n"
+                    f"<i>(Send /cancel to abort)</i>",
+                    parse_mode=ParseMode.HTML
+                )
+
+        except Exception as err:
+            logger.exception("Error in handle_callback for case %s: %s", case_code, err)
+            try:
+                await query.answer(f"⚠️ Error: {str(err)[:180]}", show_alert=True)
+            except Exception:
+                pass
+            try:
+                await query.message.reply_text(
+                    f"⚠️ <b>Case Action Error:</b> <code>{html.escape(str(err))}</code>",
+                    parse_mode=ParseMode.HTML
+                )
+            except Exception:
+                pass
 
     async def handle_admin_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message:
@@ -632,8 +783,8 @@ class SupportBotBridge:
         )
 
         await update.message.reply_text(
-            f"✓ <b>Message delivered to reporter for #{case_code}</b>\n"
-            f"<blockquote>{final_text}</blockquote>\n"
+            f"✓ <b>Message delivered to reporter for #{html.escape(case_code)}</b>\n"
+            f"<blockquote>{html.escape(final_text)}</blockquote>\n"
             f"<i>(Active reply mode. Type more to reply, or send /cancel to end.)</i>",
             parse_mode=ParseMode.HTML
         )
@@ -647,9 +798,14 @@ class SupportBotBridge:
 
         lines = ["📋 <b>Recent Support & Evidence Cases:</b>\n"]
         for c in cases:
+            cc = html.escape(str(c.get('case_code') or 'UNKNOWN'))
+            cp = html.escape(str(c.get('priority') or 'STANDARD'))
+            cg = html.escape(str(c.get('category') or 'General'))
+            cs = html.escape(str(c.get('status') or 'SUBMITTED'))
+            sub = html.escape(str(c.get('subject') or 'No Subject')[:30])
             lines.append(
-                f"• <b>#{c['case_code']}</b> [{c['priority']}] - {c['category']}\n"
-                f"   Status: <b>{c['status']}</b> | Subject: {c['subject'][:30]}...\n"
+                f"• <b>#{cc}</b> [{cp}] - {cg}\n"
+                f"   Status: <b>{cs}</b> | Subject: {sub}...\n"
             )
         lines.append("<i>Use inline cards above or /reply to interact.</i>")
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)

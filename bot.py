@@ -44,6 +44,16 @@ logger = logging.getLogger("ghost-bot")
 
 # Load environment configuration
 load_dotenv()
+
+
+def _parse_int(val, default=0) -> int:
+    try:
+        s = str(val or "").strip()
+        return int(s) if s else default
+    except (ValueError, TypeError):
+        return default
+
+
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ALLOWED_USER_IDS = [
     int(uid.strip())
@@ -52,8 +62,8 @@ ALLOWED_USER_IDS = [
 ]
 GHOST_DIR = os.getenv("GHOST_DIR", "/var/www/ghost")
 BACKUPS_DIR = os.getenv("BACKUPS_DIR", os.path.join(GHOST_DIR, "backups"))
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", ALLOWED_USER_IDS[0] if ALLOWED_USER_IDS else 0))
-SUPPORT_PORT = int(os.getenv("SUPPORT_PORT", 8080))
+ADMIN_CHAT_ID = _parse_int(os.getenv("ADMIN_CHAT_ID"), ALLOWED_USER_IDS[0] if ALLOWED_USER_IDS else 0)
+SUPPORT_PORT = _parse_int(os.getenv("SUPPORT_PORT"), 8080)
 SUPPORT_HOST = os.getenv("SUPPORT_HOST", "127.0.0.1")
 
 # Global reference to Support REST API daemon
@@ -65,7 +75,9 @@ ghost_mgr = GhostManager(ghost_dir=GHOST_DIR, backups_dir=BACKUPS_DIR)
 
 def is_authorized(user_id: int) -> bool:
     """Check if the requesting user ID is authorized."""
-    if not ALLOWED_USER_IDS:
+    if not ALLOWED_USER_IDS and not ADMIN_CHAT_ID:
+        return True
+    if ADMIN_CHAT_ID and user_id == ADMIN_CHAT_ID:
         return True
     return user_id in ALLOWED_USER_IDS
 
@@ -154,7 +166,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all inline button callback queries."""
     query = update.callback_query
     user = update.effective_user
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
 
     if not is_authorized(user.id):
         await send_unauthorized(update)
@@ -491,6 +506,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 8. SUPPORT & INCIDENT CASES
     elif data == "menu_cases_list":
         if not support_api_server or not support_api_server.vault:
+            try:
+                await query.answer("⚠️ Support Hub Vault is initializing or offline.", show_alert=True)
+            except Exception:
+                pass
             await query.edit_message_text(
                 "⚠️ *Support Hub Vault is initializing or offline.*",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]),
@@ -506,11 +525,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "New submissions from the `/support/` portal will alert you directly here in real time."
             )
             keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
-            await query.edit_message_text(
-                text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode=ParseMode.MARKDOWN
-            )
+            try:
+                await query.edit_message_text(
+                    text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                if "Message is not modified" not in str(e):
+                    raise
             return
 
         text = (
@@ -519,25 +542,43 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         keyboard = []
         for c in cases:
-            status_tag = "🟡" if c["status"] == "SUBMITTED" else ("🟠" if c["status"] == "IN_REVIEW" else "🟢")
+            c_status = str(c.get("status") or "SUBMITTED").upper()
+            status_tag = "🟡" if c_status == "SUBMITTED" else ("🟠" if c_status == "IN_REVIEW" else "🟢")
+            c_subj = str(c.get("subject") or "Untitled")[:22]
+            c_code = str(c.get("case_code") or "CASE")
             keyboard.append([
                 InlineKeyboardButton(
-                    f"{status_tag} #{c['case_code']} - {c['subject'][:22]}",
-                    callback_data=f"case_view:{c['case_code']}"
+                    f"{status_tag} #{c_code} - {c_subj}",
+                    callback_data=f"case_view:{c_code}"
                 )
             ])
         keyboard.append([InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")])
-        await query.edit_message_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.MARKDOWN
-        )
+        try:
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            if "Message is not modified" not in str(e):
+                raise
 
     # 9. CASE ACTIONS (View, Review, Close, Reject, Evidence, Reply)
     elif data.startswith("case_"):
         if support_api_server and support_api_server.bridge:
-            await support_api_server.bridge.handle_callback(update, context)
+            try:
+                await support_api_server.bridge.handle_callback(update, context)
+            except Exception as e:
+                logger.exception("Error in support bridge handle_callback: %s", e)
+                try:
+                    await query.answer(f"⚠️ Error: {str(e)[:180]}", show_alert=True)
+                except Exception:
+                    pass
         else:
+            try:
+                await query.answer("⚠️ Support Hub Vault is initializing or offline.", show_alert=True)
+            except Exception:
+                pass
             await query.edit_message_text(
                 "⚠️ *Support Hub Vault is initializing or offline.*",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]),
@@ -596,60 +637,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_menu_keyboard()
         )
         return
-
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming photos from authorized users, routing to active case chat."""
-    user = update.effective_user
-    if not is_authorized(user.id):
-        return
-
-    if support_api_server and support_api_server.bridge:
-        bridge = support_api_server.bridge
-        user_id = user.id
-        reply_to = update.message.reply_to_message
-        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
-        if is_case_session:
-            await bridge.handle_admin_message(update, context)
-            return
-
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming text messages from authorized admins, routing active case replies."""
-    user = update.effective_user
-    if not is_authorized(user.id):
-        return
-
-    if support_api_server and support_api_server.bridge:
-        bridge = support_api_server.bridge
-        user_id = user.id
-        reply_to = update.message.reply_to_message
-        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
-        if is_case_session:
-            await bridge.handle_admin_message(update, context)
-            return
-
-    if update.message.text:
-        await update.message.reply_text(
-            "ℹ️ Use the menu buttons below to manage Ghost, or type /start.",
-            reply_markup=get_main_menu_keyboard()
-        )
-
-
-async def cases_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not is_authorized(user.id):
-        return
-    if support_api_server and support_api_server.bridge:
-        await support_api_server.bridge.cases_command(update, context)
-
-
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not is_authorized(user.id):
-        return
-    if support_api_server and support_api_server.bridge:
-        await support_api_server.bridge.cancel_command(update, context)
 
     # Check 20 MB Telegram Bot API download limit
     file_size_bytes = doc.file_size or 0
@@ -711,6 +698,60 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ *Failed to download backup file:*\n`{e}`",
             parse_mode=ParseMode.MARKDOWN
         )
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming photos from authorized users, routing to active case chat."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+
+    if support_api_server and support_api_server.bridge:
+        bridge = support_api_server.bridge
+        user_id = user.id
+        reply_to = update.message.reply_to_message
+        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        if is_case_session:
+            await bridge.handle_admin_message(update, context)
+            return
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming text messages from authorized admins, routing active case replies."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+
+    if support_api_server and support_api_server.bridge:
+        bridge = support_api_server.bridge
+        user_id = user.id
+        reply_to = update.message.reply_to_message
+        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        if is_case_session:
+            await bridge.handle_admin_message(update, context)
+            return
+
+    if update.message.text:
+        await update.message.reply_text(
+            "ℹ️ Use the menu buttons below to manage Ghost, or type /start.",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+
+async def cases_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+    if support_api_server and support_api_server.bridge:
+        await support_api_server.bridge.cases_command(update, context)
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+    if support_api_server and support_api_server.bridge:
+        await support_api_server.bridge.cancel_command(update, context)
 
 
 async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
