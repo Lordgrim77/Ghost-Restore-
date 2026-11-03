@@ -41593,3 +41593,27 @@ html[data-theme="light"] body {
   background-color: #f8fafc !important;
   color: #0f172a !important;
 }
+
+
+/* ========================================================================
+   TRUE LIQUID GLASS (liquidGL) SHADER CLEARANCE
+   When liquidGL engine is active, remove native CSS blur & opaque backgrounds
+   so the WebGL/WebGPU refractive shader renders optical crystal glass directly.
+   ======================================================================== */
+html.liquidgl-active .gm-post-card,
+html.liquidgl-active .gm-team-card,
+html.liquidgl-active #gh-head,
+html.liquidgl-active .gm-author-header,
+html.liquidgl-active .author-profile,
+html.liquidgl-active .gm-newsletter-card,
+html.liquidgl-active .gm-rss-modal-card {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.liquidgl-active .gm-post-card::before,
+html.liquidgl-active .gm-team-card::before,
+html.liquidgl-active .gm-newsletter-card::before {
+  opacity: 0.4 !important;
+}

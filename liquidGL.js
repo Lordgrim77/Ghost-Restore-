@@ -12,6 +12,7 @@
 
   const RECAPTURE_INTERVAL_MS = 250;
   const renderers = new Set();
+  if (typeof window !== "undefined") window.__liquidGLRenderers__ = renderers;
   let lensOrder = 0;
   let rendering = false;
   let renderFrame = 0;

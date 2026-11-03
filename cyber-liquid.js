@@ -2,15 +2,15 @@
  * Cyber Liquid Glass Controller (powered by liquidGL)
  * PedoHunters Custom Alto Theme Design System
  * 
- * Features:
- *  1. Sticky Navigation Bar Frosted Prism Lens (#gh-head)
- *  2. Post & Feed Cards Tactile 3D Tilting Glass Slabs (.gm-post-card)
- *  3. Team & Staff Identity Cyber Glass Badges (.gm-team-card)
- *  4. Author Profile Panoramic Frosted Visor (.author-profile / .gm-author-header)
- *  5. Newsletter Subscription Energy Ribbon (.gm-newsletter-card)
- *  6. RSS Feed Frosted Modal Shield (.gm-rss-modal-card)
- *  7. Dynamic Dark/Light Theme Tint & Snapshot Synchronization
- *  8. Background Telemetry Rain Refraction Registration (#gm-cyber-hex-canvas)
+ * True Optical Refraction & Crystal Liquid Glass:
+ *  1. Sticky Navigation Bar: High-contrast refraction visor (#gh-head)
+ *  2. Post & Feed Cards: Tactile 3D Tilting Glass Slabs (.gm-post-card)
+ *  3. Team & Staff Identity: Cyber Glass Badges (.gm-team-card)
+ *  4. Author Profile: Panoramic Refraction Shield (.author-profile / .gm-author-header)
+ *  5. Newsletter Subscription: Crystalline Energy Ribbon (.gm-newsletter-card)
+ *  6. RSS Feed: Crystalline Modal Shield (.gm-rss-modal-card)
+ *  7. Dynamic Theme Tint & Snapshot Synchronization across all active renderers
+ *  8. Background Telemetry Canvas Refraction Registration (#gm-cyber-hex-canvas)
  */
 (function() {
   'use strict';
@@ -19,25 +19,25 @@
   var activeLenses = [];
   var isInitialized = false;
 
-  // Tint definitions for Dark and Light modes
+  // Ultra-subtle, transparent optical tints for True Refraction (frost = 0)
   function getTints(isLight) {
     if (isLight) {
       return {
-        nav: "rgba(255, 255, 255, 0.55)",
-        card: "rgba(255, 255, 255, 0.40)",
-        team: "rgba(245, 247, 250, 0.50)",
-        author: "rgba(255, 255, 255, 0.50)",
+        nav: "rgba(255, 255, 255, 0.18)",
+        card: "rgba(255, 255, 255, 0.14)",
+        team: "rgba(255, 255, 255, 0.15)",
+        author: "rgba(255, 255, 255, 0.15)",
         modal: "rgba(255, 255, 255, 0.85)",
-        newsletter: "rgba(255, 255, 255, 0.45)"
+        newsletter: "rgba(255, 255, 255, 0.14)"
       };
     } else {
       return {
-        nav: "rgba(4, 6, 9, 0.50)",
-        card: "rgba(10, 15, 25, 0.40)",
-        team: "rgba(8, 12, 20, 0.48)",
-        author: "rgba(5, 8, 14, 0.50)",
+        nav: "rgba(10, 16, 28, 0.22)",
+        card: "rgba(10, 16, 28, 0.18)",
+        team: "rgba(8, 12, 22, 0.20)",
+        author: "rgba(6, 10, 20, 0.20)",
         modal: "rgba(3, 7, 18, 0.70)",
-        newsletter: "rgba(6, 10, 18, 0.45)"
+        newsletter: "rgba(6, 10, 20, 0.18)"
       };
     }
   }
@@ -54,12 +54,18 @@
     for (var i = 0; i < activeLenses.length; i++) {
       var item = activeLenses[i];
       if (item && item.lens && typeof item.lens.setTint === 'function') {
-        var tintVal = tints[item.category] || (isLight ? "rgba(255, 255, 255, 0.45)" : "rgba(10, 15, 25, 0.40)");
+        var tintVal = tints[item.category] || (isLight ? "rgba(255, 255, 255, 0.15)" : "rgba(10, 16, 28, 0.20)");
         item.lens.setTint(tintVal);
       }
     }
-    // Re-capture snapshot after theme change so refraction colors match the active palette
-    if (window.__liquidGLRenderer__ && typeof window.__liquidGLRenderer__.captureSnapshot === 'function') {
+    // Re-capture snapshot across all active liquidGL renderers
+    if (window.__liquidGLRenderers__) {
+      window.__liquidGLRenderers__.forEach(function(r) {
+        if (r && typeof r.captureSnapshot === 'function') {
+          r.captureSnapshot();
+        }
+      });
+    } else if (window.__liquidGLRenderer__ && typeof window.__liquidGLRenderer__.captureSnapshot === 'function') {
       window.__liquidGLRenderer__.captureSnapshot();
     }
   }
@@ -83,6 +89,9 @@
     }
     isInitialized = true;
 
+    // Signal to CSS that liquidGL is active so native CSS blur & opaque backgrounds are replaced
+    document.documentElement.classList.add('liquidgl-active');
+
     var isLight = getCurrentThemeIsLight();
     var tints = getTints(isLight);
 
@@ -92,7 +101,7 @@
     var sodo = document.getElementById('sodo-search-root');
     if (sodo) sodo.setAttribute('data-liquid-ignore', 'true');
 
-    // 1. Sticky Navigation Bar: Frosted Prism Visor
+    // 1. Sticky Navigation Bar: True Refraction Prism Visor (frost = 0, magnify = 1.08)
     var navEl = document.querySelector('#gh-head');
     if (navEl) {
       try {
@@ -100,12 +109,13 @@
           target: '#gh-head',
           snapshot: 'body',
           zIndex: 100,
-          resolution: 1.5,
-          refraction: 0.020,
-          bevelDepth: 0.05,
-          bevelWidth: 0.06,
-          frost: 2.0,
-          aberration: 0.02,
+          resolution: 2.0,
+          refraction: 0.065,
+          bevelDepth: 0.08,
+          bevelWidth: 0.25,
+          frost: 0,
+          magnify: 1.08,
+          aberration: 0.035,
           specular: true,
           shadow: true,
           tint: tints.nav
@@ -116,7 +126,7 @@
       }
     }
 
-    // 2. Feed Post Cards: Tactile 3D Glass Slabs
+    // 2. Feed Post Cards: Tactile 3D Refracting Glass Slabs (frost = 0, refraction = 0.075, magnify = 1.12)
     var postCards = document.querySelectorAll('.gm-post-card');
     if (postCards && postCards.length > 0) {
       try {
@@ -124,16 +134,17 @@
           target: '.gm-post-card',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 1.5,
-          refraction: 0.016,
-          bevelDepth: 0.06,
-          bevelWidth: 0.12,
+          resolution: 2.0,
+          refraction: 0.075,
+          bevelDepth: 0.09,
+          bevelWidth: 0.30,
           frost: 0,
-          aberration: 0.02,
+          magnify: 1.12,
+          aberration: 0.040,
           specular: true,
           shadow: true,
           tilt: true,
-          tiltFactor: 5,
+          tiltFactor: 6,
           tiltEase: 350,
           tint: tints.card
         });
@@ -143,7 +154,7 @@
       }
     }
 
-    // 3. Team Member Cards: Cyber ID Badges
+    // 3. Team Member Cards: Cyber ID Badges (frost = 0, refraction = 0.075, magnify = 1.12)
     var teamCards = document.querySelectorAll('.gm-team-card');
     if (teamCards && teamCards.length > 0) {
       try {
@@ -151,16 +162,17 @@
           target: '.gm-team-card',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 1.5,
-          refraction: 0.018,
-          bevelDepth: 0.08,
-          bevelWidth: 0.14,
-          frost: 0.6,
-          aberration: 0.015,
+          resolution: 2.0,
+          refraction: 0.075,
+          bevelDepth: 0.09,
+          bevelWidth: 0.30,
+          frost: 0,
+          magnify: 1.12,
+          aberration: 0.040,
           specular: true,
           shadow: true,
           tilt: true,
-          tiltFactor: 4,
+          tiltFactor: 5,
           tiltEase: 300,
           tint: tints.team
         });
@@ -170,7 +182,7 @@
       }
     }
 
-    // 4. Author Showcase Banner: Panoramic Glass Shield
+    // 4. Author Showcase Banner: Panoramic Glass Shield (frost = 0, refraction = 0.060, magnify = 1.08)
     var authorHeader = document.querySelector('.gm-author-header, .author-profile');
     if (authorHeader) {
       try {
@@ -178,12 +190,13 @@
           target: authorHeader.classList.contains('gm-author-header') ? '.gm-author-header' : '.author-profile',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 1.5,
-          refraction: 0.012,
-          bevelDepth: 0.04,
-          bevelWidth: 0.08,
-          frost: 1.5,
-          aberration: 0.01,
+          resolution: 2.0,
+          refraction: 0.060,
+          bevelDepth: 0.07,
+          bevelWidth: 0.24,
+          frost: 0,
+          magnify: 1.08,
+          aberration: 0.030,
           specular: true,
           shadow: true,
           tint: tints.author
@@ -194,7 +207,7 @@
       }
     }
 
-    // 5. Newsletter Subscription Card: Crystalline Energy Ribbon
+    // 5. Newsletter Subscription Card: Crystalline Energy Ribbon (frost = 0, refraction = 0.065, magnify = 1.10)
     var newsletterCard = document.querySelector('.gm-newsletter-card');
     if (newsletterCard) {
       try {
@@ -202,13 +215,15 @@
           target: '.gm-newsletter-card',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 1.5,
-          refraction: 0.015,
-          bevelDepth: 0.05,
-          bevelWidth: 0.10,
-          frost: 1.0,
-          aberration: 0.02,
+          resolution: 2.0,
+          refraction: 0.065,
+          bevelDepth: 0.08,
+          bevelWidth: 0.26,
+          frost: 0,
+          magnify: 1.10,
+          aberration: 0.035,
           specular: true,
+          shadow: true,
           tint: tints.newsletter
         });
         registerLens('newsletter', newsLens);
@@ -225,12 +240,13 @@
           target: '.gm-rss-modal-card',
           snapshot: 'body',
           zIndex: 1000,
-          resolution: 1.5,
-          refraction: 0.030,
+          resolution: 2.0,
+          refraction: 0.080,
           bevelDepth: 0.12,
-          bevelWidth: 0.16,
-          frost: 3.0,
-          aberration: 0.06,
+          bevelWidth: 0.24,
+          frost: 0,
+          magnify: 1.10,
+          aberration: 0.050,
           specular: true,
           reveal: "fade",
           tint: tints.modal
