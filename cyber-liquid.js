@@ -1,16 +1,16 @@
 /**
- * Cyber Liquid Glass Controller (powered by liquidGL)
+ * Cyber Liquid Glass Controller (powered by liquidGL + Lenis)
  * PedoHunters Custom Alto Theme Design System
  * 
- * True Optical Refraction & Crystal Liquid Glass:
- *  1. Sticky Navigation Bar: High-contrast refraction visor (#gh-head)
- *  2. Post & Feed Cards: Tactile 3D Tilting Glass Slabs (.gm-post-card)
- *  3. Team & Staff Identity: Cyber Glass Badges (.gm-team-card)
- *  4. Author Profile: Panoramic Refraction Shield (.author-profile / .gm-author-header)
- *  5. Newsletter Subscription: Crystalline Energy Ribbon (.gm-newsletter-card)
- *  6. RSS Feed: Crystalline Modal Shield (.gm-rss-modal-card)
- *  7. Dynamic Theme Tint & Snapshot Synchronization across all active renderers
- *  8. Background Telemetry Canvas Refraction Registration (#gm-cyber-hex-canvas)
+ * High-Performance True Optical Refraction & 60fps Synchronized Scroll:
+ *  1. Sticky Navigation Bar Refraction Visor (#gh-head)
+ *  2. Post & Feed Cards Refraction Slabs (.gm-post-card)
+ *  3. Team & Staff Identity Refraction Badges (.gm-team-card)
+ *  4. Author Profile Panoramic Visor (.author-profile / .gm-author-header)
+ *  5. Newsletter Subscription Crystal Ribbon (.gm-newsletter-card)
+ *  6. RSS Feed Crystalline Modal Shield (.gm-rss-modal-card)
+ *  7. Lenis + WebGL Frame-Locked Synchronized Scrolling (zero scroll jitter / lag)
+ *  8. Multi-Renderer Snapshot Synchronization for Theme Switches
  */
 (function() {
   'use strict';
@@ -101,7 +101,7 @@
     var sodo = document.getElementById('sodo-search-root');
     if (sodo) sodo.setAttribute('data-liquid-ignore', 'true');
 
-    // 1. Sticky Navigation Bar: True Refraction Prism Visor (frost = 0, magnify = 1.08)
+    // 1. Sticky Navigation Bar: True Refraction Prism Visor
     var navEl = document.querySelector('#gh-head');
     if (navEl) {
       try {
@@ -109,7 +109,8 @@
           target: '#gh-head',
           snapshot: 'body',
           zIndex: 100,
-          resolution: 2.0,
+          resolution: 1.2,
+          content: false,
           refraction: 0.065,
           bevelDepth: 0.08,
           bevelWidth: 0.25,
@@ -117,7 +118,7 @@
           magnify: 1.08,
           aberration: 0.035,
           specular: true,
-          shadow: true,
+          shadow: false,
           tint: tints.nav
         });
         registerLens('nav', navLens);
@@ -126,7 +127,7 @@
       }
     }
 
-    // 2. Feed Post Cards: Tactile 3D Refracting Glass Slabs (frost = 0, refraction = 0.075, magnify = 1.12)
+    // 2. Feed Post Cards: 60fps Refracting Glass Slabs
     var postCards = document.querySelectorAll('.gm-post-card');
     if (postCards && postCards.length > 0) {
       try {
@@ -134,18 +135,17 @@
           target: '.gm-post-card',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 2.0,
+          resolution: 1.0,
+          content: false,
+          tilt: false,
           refraction: 0.075,
-          bevelDepth: 0.09,
-          bevelWidth: 0.30,
+          bevelDepth: 0.08,
+          bevelWidth: 0.28,
           frost: 0,
-          magnify: 1.12,
-          aberration: 0.040,
+          magnify: 1.10,
+          aberration: 0.035,
           specular: true,
-          shadow: true,
-          tilt: true,
-          tiltFactor: 6,
-          tiltEase: 350,
+          shadow: false,
           tint: tints.card
         });
         registerLens('card', cardLenses);
@@ -154,7 +154,7 @@
       }
     }
 
-    // 3. Team Member Cards: Cyber ID Badges (frost = 0, refraction = 0.075, magnify = 1.12)
+    // 3. Team Member Cards: Cyber ID Badges
     var teamCards = document.querySelectorAll('.gm-team-card');
     if (teamCards && teamCards.length > 0) {
       try {
@@ -162,18 +162,17 @@
           target: '.gm-team-card',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 2.0,
+          resolution: 1.0,
+          content: false,
+          tilt: false,
           refraction: 0.075,
-          bevelDepth: 0.09,
-          bevelWidth: 0.30,
+          bevelDepth: 0.08,
+          bevelWidth: 0.28,
           frost: 0,
-          magnify: 1.12,
-          aberration: 0.040,
+          magnify: 1.10,
+          aberration: 0.035,
           specular: true,
-          shadow: true,
-          tilt: true,
-          tiltFactor: 5,
-          tiltEase: 300,
+          shadow: false,
           tint: tints.team
         });
         registerLens('team', teamLenses);
@@ -182,7 +181,7 @@
       }
     }
 
-    // 4. Author Showcase Banner: Panoramic Glass Shield (frost = 0, refraction = 0.060, magnify = 1.08)
+    // 4. Author Showcase Banner: Panoramic Glass Shield
     var authorHeader = document.querySelector('.gm-author-header, .author-profile');
     if (authorHeader) {
       try {
@@ -190,7 +189,8 @@
           target: authorHeader.classList.contains('gm-author-header') ? '.gm-author-header' : '.author-profile',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 2.0,
+          resolution: 1.0,
+          content: false,
           refraction: 0.060,
           bevelDepth: 0.07,
           bevelWidth: 0.24,
@@ -198,7 +198,7 @@
           magnify: 1.08,
           aberration: 0.030,
           specular: true,
-          shadow: true,
+          shadow: false,
           tint: tints.author
         });
         registerLens('author', authorLens);
@@ -207,7 +207,7 @@
       }
     }
 
-    // 5. Newsletter Subscription Card: Crystalline Energy Ribbon (frost = 0, refraction = 0.065, magnify = 1.10)
+    // 5. Newsletter Subscription Card: Crystalline Energy Ribbon
     var newsletterCard = document.querySelector('.gm-newsletter-card');
     if (newsletterCard) {
       try {
@@ -215,7 +215,8 @@
           target: '.gm-newsletter-card',
           snapshot: 'body',
           zIndex: 2,
-          resolution: 2.0,
+          resolution: 1.0,
+          content: false,
           refraction: 0.065,
           bevelDepth: 0.08,
           bevelWidth: 0.26,
@@ -223,7 +224,7 @@
           magnify: 1.10,
           aberration: 0.035,
           specular: true,
-          shadow: true,
+          shadow: false,
           tint: tints.newsletter
         });
         registerLens('newsletter', newsLens);
@@ -240,13 +241,14 @@
           target: '.gm-rss-modal-card',
           snapshot: 'body',
           zIndex: 1000,
-          resolution: 2.0,
+          resolution: 1.0,
+          content: false,
           refraction: 0.080,
           bevelDepth: 0.12,
           bevelWidth: 0.24,
           frost: 0,
           magnify: 1.10,
-          aberration: 0.050,
+          aberration: 0.040,
           specular: true,
           reveal: "fade",
           tint: tints.modal
@@ -257,18 +259,36 @@
       }
     }
 
-    // 7. Register Dynamic Background Telemetry Canvas
-    var hexCanvas = document.getElementById('gm-cyber-hex-canvas');
-    if (hexCanvas && typeof window.liquidGL.registerDynamic === 'function') {
-      window.liquidGL.registerDynamic(hexCanvas);
+    // 7. Initialize Lenis Virtual Smooth Scrolling & Synchronize liquidGL
+    // This locks DOM scroll & WebGL render loop onto the exact same RAF tick, eliminating scroll lag!
+    if (typeof window.Lenis === 'function') {
+      try {
+        var lenis = new window.Lenis({
+          duration: 1.1,
+          easing: function(t) { return Math.min(1, 1.001 - Math.pow(2, -10 * t)); },
+          orientation: 'vertical',
+          gestureOrientation: 'vertical',
+          smoothWheel: true,
+          wheelMultiplier: 1.0,
+          touchMultiplier: 1.5
+        });
+
+        if (typeof window.liquidGL.syncWith === 'function') {
+          window.liquidGL.syncWith({ lenis: lenis });
+        } else {
+          function lenisRaf(time) {
+            lenis.raf(time);
+            requestAnimationFrame(lenisRaf);
+          }
+          requestAnimationFrame(lenisRaf);
+        }
+        window.__lenis__ = lenis;
+      } catch(err) {
+        console.warn("Lenis init error:", err);
+      }
     }
 
-    // 8. Sync with smooth scrolling
-    if (typeof window.liquidGL.syncWith === 'function') {
-      window.liquidGL.syncWith();
-    }
-
-    // 9. Observer for theme changes to dynamically sync tint & refresh snapshot
+    // 8. Observer for theme changes to dynamically sync tint & refresh snapshot
     var themeTimer = null;
     var observer = new MutationObserver(function(mutations) {
       for (var m = 0; m < mutations.length; m++) {

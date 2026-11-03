@@ -6147,7 +6147,7 @@ fn fs() -> @location(0) vec4<f32> {
             renderer.canvas.style.visibility = active ? "visible" : "hidden";
           }
           if (!active) continue;
-          if (renderer._needsFrame(lower)) renderer._renderFrame(lower);
+          if (renderer._needsFrame([])) renderer._renderFrame([]);
           lower.push(renderer);
         }
       } finally {
@@ -7988,18 +7988,21 @@ fn fs() -> @location(0) vec4<f32> {
         height: rect.height,
       };
 
-      const style = window.getComputedStyle(this.el);
-      const brRaw = style.borderTopLeftRadius.split(" ")[0];
-      const isPct = brRaw.trim().endsWith("%");
-      let brPx;
-      if (isPct) {
-        const pct = parseFloat(brRaw);
-        brPx = (Math.min(rect.width, rect.height) * pct) / 100;
-      } else {
-        brPx = parseFloat(brRaw);
+      if (this._cachedRadiusCss === undefined || !prev || rect.width !== prev.width || rect.height !== prev.height) {
+        const style = window.getComputedStyle(this.el);
+        const brRaw = style.borderTopLeftRadius.split(" ")[0];
+        const isPct = brRaw.trim().endsWith("%");
+        let brPx;
+        if (isPct) {
+          const pct = parseFloat(brRaw);
+          brPx = (Math.min(rect.width, rect.height) * pct) / 100;
+        } else {
+          brPx = parseFloat(brRaw);
+        }
+        const maxAllowedCss = Math.min(rect.width, rect.height) * 0.5;
+        this._cachedRadiusCss = Math.min(brPx, maxAllowedCss);
       }
-      const maxAllowedCss = Math.min(rect.width, rect.height) * 0.5;
-      this.radiusCss = Math.min(brPx, maxAllowedCss);
+      this.radiusCss = this._cachedRadiusCss;
 
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       this.radiusGl = this.radiusCss * dpr;
