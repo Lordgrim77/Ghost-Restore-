@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="{{@site.locale}}"{{#match @custom.color_scheme "Light"}} class="light-mode" data-theme="light"{{else}} class="dark-mode" data-theme="dark"{{/match}}>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{meta_title page=(t " (Page %)")}}</title>
+
+    <!-- 1. Synchronous Inline Anti-FOUC Theme Detection (Runs BEFORE first paint) -->
+    <script>
+        (function() {
+            try {
+                var saved = localStorage.getItem('user-theme');
+                var defaultTheme = '{{#match @custom.color_scheme "Light"}}light{{else}}dark{{/match}}';
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var theme = saved || (prefersDark ? 'dark' : defaultTheme);
+                var root = document.documentElement;
+                if (theme === 'light') {
+                    root.classList.remove('dark-mode');
+                    root.classList.add('light-mode');
+                    root.setAttribute('data-theme', 'light');
+                } else {
+                    root.classList.remove('light-mode');
+                    root.classList.add('dark-mode');
+                    root.setAttribute('data-theme', 'dark');
+                }
+            } catch(e) {}
+        })();
+    </script>
+
+    <!-- 2. Critical Anti-FOUC & Anti-Flash Styles (Synchronous) -->
+    <style id="gm-critical-anti-fouc">
+        /* Hide Portal iframe until our custom theme is attached (Eliminates Popup Flash) */
+        #ghost-portal-root iframe:not([data-styled="true"]) {
+            opacity: 0 !important;
+            visibility: hidden !important;
+        }
+        #ghost-portal-root iframe[data-styled="true"] {
+            opacity: 1 !important;
+            visibility: visible !important;
+            transition: opacity 0.12s ease-out !important;
+        }
+
+        /* Enforce theme background & text color immediately on html/body */
+        html.dark-mode, html[data-theme="dark"], html.dark-mode body, html[data-theme="dark"] body {
+            background-color: #040609 !important;
+            color: #f8fafc !important;
+            --ghost-accent-color: #ffffff !important;
+        }
+        html.light-mode, html[data-theme="light"], html.light-mode body, html[data-theme="light"] body {
+            background-color: #f8fafc !important;
+            color: #090b10 !important;
+            --ghost-accent-color: #000000 !important;
+        }
+
+        /* Immediately enforce obsidian/lunar palette for all buttons during load */
+        html.dark-mode .gh-button,
+        html.dark-mode .gh-btn,
+        html.dark-mode .gh-head-btn,
+        html.dark-mode .gm-theme-toggle,
+        html.dark-mode .gm-head-signin-btn,
+        html.dark-mode .gm-search-bar-btn,
+        html.dark-mode .gm-mobile-menu-btn,
+        html[data-theme="dark"] .gh-button,
+        html[data-theme="dark"] .gh-btn,
+        html[data-theme="dark"] .gh-head-btn,
+        html[data-theme="dark"] .gm-theme-toggle,
+        html[data-theme="dark"] .gm-head-signin-btn,
+        html[data-theme="dark"] .gm-search-bar-btn,
+        html[data-theme="dark"] .gm-mobile-menu-btn {
+            background-color: rgba(255, 255, 255, 0.08) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            color: #ffffff !important;
+        }
+        html.dark-mode .gh-primary-btn,
+        html.dark-mode button.gm-newsletter-btn,
+        html.dark-mode button[type="submit"]:not(.gm-search-bar-btn),
+        html[data-theme="dark"] .gh-primary-btn,
+        html[data-theme="dark"] button.gm-newsletter-btn,
+        html[data-theme="dark"] button[type="submit"]:not(.gm-search-bar-btn) {
+            background-color: #ffffff !important;
+            color: #090b10 !important;
+            border-color: #ffffff !important;
+        }
+
+        /* Light Mode Load Enforcements */
+        html.light-mode .gh-button,
+        html.light-mode .gh-btn,
+        html.light-mode .gh-head-btn,
+        html.light-mode .gm-theme-toggle,
+        html.light-mode .gm-head-signin-btn,
+        html.light-mode .gm-search-bar-btn,
+        html.light-mode .gm-mobile-menu-btn,
+        html[data-theme="light"] .gh-button,
+        html[data-theme="light"] .gh-btn,
+        html[data-theme="light"] .gh-head-btn,
+        html[data-theme="light"] .gm-theme-toggle,
+        html[data-theme="light"] .gm-head-signin-btn,
+        html[data-theme="light"] .gm-search-bar-btn,
+        html[data-theme="light"] .gm-mobile-menu-btn {
+            background-color: rgba(0, 0, 0, 0.05) !important;
+            border-color: rgba(0, 0, 0, 0.12) !important;
+            color: #090b10 !important;
+        }
+    </style>
+
+    <!-- 3. Synchronous Custom Stylesheets in <head> -->
+    <link rel="stylesheet" href="{{asset "built/screen.css"}}">
+    <link rel="stylesheet" href="{{asset "built/glassmorphism.css"}}?v=team-stretch-v3">
+    <link rel="stylesheet" href="{{asset "built/cyber-splash.css"}}?v=cyber-v2">
+
+    <meta name="view-transition" content="same-origin">
+
+    <!-- Anti-Splash Flash (Runs on initial visit and page refresh/reload, bypasses on internal link navigation) -->
+    <script>
+        (function() {
+            try {
+                var isReload = false;
+                var navEntries = window.performance && performance.getEntriesByType && performance.getEntriesByType('navigation');
+                if (navEntries && navEntries.length > 0 && navEntries[0].type === 'reload') {
+                    isReload = true;
+                } else if (window.performance && window.performance.navigation && window.performance.navigation.type === 1) {
+                    isReload = true;
+                }
+
+                if (isReload) {
+                    sessionStorage.removeItem('gm_cyber_splash_shown');
+                } else if (sessionStorage.getItem('gm_cyber_splash_shown') === '1') {
+                    document.write('<style>#gm-cyber-splash{display:none!important;opacity:0!important;visibility:hidden!important;}</style>');
+                }
+            } catch(e) {}
+        })();
+    </script>
+
+    <!-- 4. Portal Theme Styler in <head> (Synchronously Intercepts Iframes Before First Paint) -->
+    <script src="{{asset "built/portal-theme.js"}}?v=portal-contrast-v16"></script>
+    <script src="{{asset "built/comments-theme.js"}}?v=comments-ux-v17"></script>
+    <script src="{{asset "built/search-theme.js"}}?v=search-v1"></script>
+    <script src="{{asset "built/member-avatars.js"}}?v=6"></script>
+
+        {{#if @member}}
+    <script>
+        window.gmCurrentMember = {
+            name: "{{@member.name}}",
+            email: "{{@member.email}}"
+        };
+    </script>
+    {{/if}}
+
+    {{ghost_head}}
+</head>
+
+<body class="{{body_class}} is-head-{{#match @custom.navigation_layout "Logo on the left"}}left-logo{{else match @custom.navigation_layout "Logo in the middle"}}middle-logo{{else}}stacked{{/match}}{{#match @custom.title_font "=" "Elegant serif"}} has-serif-title{{/match}}{{#match @custom.body_font "=" "Elegant serif"}} has-serif-body{{/match}}">
+
+<!-- Hairline Page Transition Progress Bar -->
+<div id="gm-page-transition-bar" aria-hidden="true"></div>
+
+<!-- 0. Clean Professional Site Preloader (Runs once per session) -->
+<div id="gm-cyber-splash" aria-hidden="true" data-liquid-ignore="true">
+    <div class="gm-splash-content">
+        <div class="gm-splash-logo-wrap">
+            {{#if @site.logo}}
+                <img class="gm-splash-logo gm-splash-logo-light" src="{{@site.logo}}" alt="{{@site.title}}">
+                {{#if @custom.white_logo_for_dark_mode}}
+                    <img class="gm-splash-logo gm-splash-logo-dark" src="{{img_url @custom.white_logo_for_dark_mode}}" alt="{{@site.title}}">
+                {{/if}}
+            {{else}}
+                <span class="gm-splash-fallback-title">{{@site.title}}</span>
+            {{/if}}
+        </div>
+        <div class="gm-splash-meta">
+            <span class="gm-splash-label">Loading {{@site.title}}</span>
+            <span class="gm-splash-dots"><span class="dot-1">.</span><span class="dot-2">.</span><span class="dot-3">.</span></span>
+        </div>
+        <div class="gm-splash-progress-track">
+            <div class="gm-splash-progress-bar"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 1. Ambient Cryptographic Telemetry Canvas -->
+<canvas id="gm-cyber-hex-canvas" aria-hidden="true"></canvas>
+
+<div class="site">
+
+    <header id="gh-head" class="gh-head gh-outer">
+        <div class="gh-head-inner">
+            <div class="gh-head-brand">
+                <div class="gh-head-brand-wrapper">
+                    <a class="gh-head-logo" href="{{@site.url}}">
+                        {{#if @site.logo}}
+                            <img src="{{@site.logo}}" alt="{{@site.title}}">
+                            {{#if @custom.white_logo_for_dark_mode}}
+                                <img src="{{img_url @custom.white_logo_for_dark_mode}}" alt="{{@site.title}}">
+                            {{/if}}
+                        {{else}}
+                            {{@site.title}}
+                        {{/if}}
+                    </a>
+                </div>
+            </div>
+
+            <nav class="gh-head-menu">
+                {{navigation}}
+                <div class="gm-menu-theme-item">
+                    <button class="gm-theme-toggle gm-menu-theme-btn" id="gmThemeToggleBtn" aria-label="Toggle Theme">
+                        <span class="gm-menu-theme-left">
+                            <span id="gmThemeIcon" class="gm-theme-icon">☀️</span>
+                            <span class="gm-menu-theme-label">Theme</span>
+                        </span>
+                        <span id="gmThemeText" class="gm-menu-theme-badge">Light</span>
+                    </button>
+                </div>
+            </nav>
+
+            <div class="gh-head-actions">
+                <button class="gh-search gm-search-bar-btn gm-search-btn" aria-label="{{t "Search this site"}}" data-ghost-search title="{{t "Search"}}">
+                    <span class="gm-search-icon">{{> "icons/search"}}</span>
+                    <span class="gm-search-label">{{t "Search"}}</span>
+                    <kbd class="gm-search-kbd" id="gmSearchKbd">Ctrl K</kbd>
+                </button>
+                {{#unless @member}}
+                    <a class="gm-head-signin-btn" href="#/portal/signin" data-portal="signin">Sign in</a>
+                {{else}}
+                    <a class="gm-head-signin-btn gm-head-account-btn" href="{{@site.url}}/account/">Account</a>
+                {{/unless}}
+                <button class="gm-mobile-menu-btn" id="gmMobileMenuBtn" aria-label="Toggle Navigation Menu">
+                    <span class="gm-menu-icon-bars">☰</span>
+                    <span class="gm-menu-icon-close">✕</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    {{#is "home"}}
+        {{#if @custom.show_featured_posts}}
+            {{> "featured"}}
+        {{/if}}
+    {{/is}}
+
+    <div class="site-content">
+        {{{body}}}
+    </div>
+
+    <footer class="gh-foot{{#unless @site.secondary_navigation}} no-menu{{/unless}} gh-outer">
+        <div class="gh-foot-inner gh-inner">
+            <div class="gh-copyright">
+                {{@site.title}} &copy; {{date format="YYYY"}}
+            </div>
+            <div class="gm-foot-official-links">
+                <a href="https://t.me/StopAbuseTeam" target="_blank" rel="noopener noreferrer" class="gm-foot-link gm-foot-tg-link" aria-label="Official Telegram Channel">
+                    <svg class="gm-foot-tg-icon" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z"/>
+                    </svg>
+                    <span>t.me/StopAbuseTeam</span>
+                </a>
+                <a href="mailto:contact@pedohunters.help" class="gm-foot-link" aria-label="Official Contact Email">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                        <polyline points="22,6 12,13 2,6"></polyline>
+                    </svg>
+                    <span>contact@pedohunters.help</span>
+                </a>
+            </div>
+            <div class="gh-foot-right">
+                {{#if @site.secondary_navigation}}
+                    <nav class="gh-foot-menu">
+                        {{navigation type="secondary"}}
+                    </nav>
+                {{/if}}
+            </div>
+        </div>
+    </footer>
+
+</div>
+
+{{#is "post, page"}}
+    {{> "pswp"}}
+{{/is}}
+
+<script
+    src="https://code.jquery.com/jquery-3.5.1.min.js"
+    integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0="
+    crossorigin="anonymous">
+</script>
+<script src="{{asset "built/main.min.js"}}"></script>
+
+<script id="gm-koenig-post-defense">
+(function() {
+    function initKoenigPostDefense() {
+        // 1. Safe Koenig Gallery Handling: ensure ratio calculation never crashes
+        document.querySelectorAll('.kg-gallery-image img').forEach(function(img) {
+            const container = img.closest('.kg-gallery-image');
+            if (!container) return;
+            const w = parseFloat(img.getAttribute('width')) || img.naturalWidth || 4;
+            const h = parseFloat(img.getAttribute('height')) || img.naturalHeight || 3;
+            if (w && h && h > 0) {
+                const ratio = w / h;
+                container.style.flex = ratio + ' 1 0%';
+            } else {
+                container.style.flex = '1 1 0%';
+            }
+            if (!img.complete) {
+                img.addEventListener('load', function() {
+                    const nw = img.naturalWidth || 4;
+                    const nh = img.naturalHeight || 3;
+                    if (nw && nh && nh > 0) {
+                        container.style.flex = (nw / nh) + ' 1 0%';
+                    }
+                }, { once: true });
+            }
+        });
+
+        // 2. Safe Koenig Toggle Cards
+        document.querySelectorAll('.kg-toggle-heading').forEach(function(heading) {
+            if (heading.dataset.toggleInit) return;
+            heading.dataset.toggleInit = 'true';
+            heading.addEventListener('click', function() {
+                const card = heading.closest('.kg-toggle-card');
+                if (!card) return;
+                const state = card.getAttribute('data-kg-toggle-state');
+                card.setAttribute('data-kg-toggle-state', state === 'open' ? 'close' : 'open');
+            });
+        });
+
+        // 3. Iframe & Embed Anti-Collapse Protection
+        document.querySelectorAll('.gh-content iframe').forEach(function(iframe) {
+            const reframeWrap = iframe.closest('.js-reframe');
+            if (reframeWrap) {
+                const pt = parseFloat(reframeWrap.style.paddingTop);
+                if (isNaN(pt) || pt <= 5) {
+                    reframeWrap.style.paddingTop = '56.25%';
+                }
+            }
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initKoenigPostDefense);
+    } else {
+        initKoenigPostDefense();
+    }
+    window.addEventListener('load', initKoenigPostDefense);
+})();
+</script>
+
+<script>
+(function() {
+    const html = document.documentElement;
+    const btn = document.getElementById('gmThemeToggleBtn');
+    const icon = document.getElementById('gmThemeIcon');
+    const text = document.getElementById('gmThemeText');
+
+    const saved = localStorage.getItem('user-theme');
+    const defaultTheme = '{{#match @custom.color_scheme "Light"}}light{{else}}dark{{/match}}';
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    let theme = saved || (prefersDark ? 'dark' : defaultTheme);
+
+    function apply(t) {
+        if (t === 'dark') {
+            html.classList.add('dark-mode');
+            html.classList.remove('light-mode');
+            html.setAttribute('data-theme', 'dark');
+            document.querySelectorAll('#gmThemeIcon, .gm-theme-icon').forEach(el => el.textContent = '🌙');
+            document.querySelectorAll('#gmThemeText, .gm-theme-text, .gm-menu-theme-badge').forEach(el => el.textContent = 'Dark');
+        } else {
+            html.classList.remove('dark-mode');
+            html.classList.add('light-mode');
+            html.setAttribute('data-theme', 'light');
+            document.querySelectorAll('#gmThemeIcon, .gm-theme-icon').forEach(el => el.textContent = '☀️');
+            document.querySelectorAll('#gmThemeText, .gm-theme-text, .gm-menu-theme-badge').forEach(el => el.textContent = 'Light');
+        }
+        localStorage.setItem('user-theme', t);
+    }
+
+    apply(theme);
+
+    document.querySelectorAll('.gm-theme-toggle').forEach(function(toggleBtn) {
+        toggleBtn.addEventListener('click', function(e) {
+            if (e) e.preventDefault();
+            theme = (html.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
+            apply(theme);
+        });
+    });
+
+    // Mobile Hamburger Dropdown Menu
+    const menuBtn = document.getElementById('gmMobileMenuBtn');
+    const head = document.getElementById('gh-head');
+    if (menuBtn && head) {
+        menuBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            head.classList.toggle('is-menu-open');
+        });
+        document.addEventListener('click', function(e) {
+            if (head.classList.contains('is-menu-open') && !head.contains(e.target)) {
+                head.classList.remove('is-menu-open');
+            }
+        });
+    }
+
+    // Card & Newsletter Cursor Spotlight (Optimized with requestAnimationFrame)
+    function initSpotlights() {
+        const cards = document.querySelectorAll('.gm-post-card, .gm-newsletter-card');
+        cards.forEach(function(card) {
+            if (card.dataset.spotlightInit) return;
+            card.dataset.spotlightInit = 'true';
+            let raf = null;
+            let mx = -500, my = -500;
+            card.addEventListener('mousemove', function(e) {
+                const rect = card.getBoundingClientRect();
+                mx = e.clientX - rect.left;
+                my = e.clientY - rect.top;
+                if (!raf) {
+                    raf = requestAnimationFrame(function() {
+                        card.style.setProperty('--mouse-x', mx + 'px');
+                        card.style.setProperty('--mouse-y', my + 'px');
+                        raf = null;
+                    });
+                }
+            }, { passive: true });
+            card.addEventListener('mouseleave', function() {
+                if (raf) { cancelAnimationFrame(raf); raf = null; }
+                card.style.removeProperty('--mouse-x');
+                card.style.removeProperty('--mouse-y');
+            });
+        });
+    }
+    initSpotlights();
+    window.addEventListener('load', initSpotlights);
+
+    // Dynamic Active Navigation Highlight (Handles Custom Routes like /posts/)
+    function highlightActiveNav() {
+        const path = (window.location.pathname || '').replace(/\/+$/, '') || '/';
+        document.querySelectorAll('.gh-head-menu .nav li, .gh-foot-menu .nav li').forEach(function(li) {
+            const a = li.querySelector('a');
+            if (!a) return;
+            const aPath = (a.pathname || '').replace(/\/+$/, '') || '/';
+            if (aPath === path) {
+                li.classList.add('nav-current');
+            } else {
+                li.classList.remove('nav-current');
+            }
+        });
+    }
+    highlightActiveNav();
+    window.addEventListener('load', highlightActiveNav);
+
+    // Dynamic search keyboard shortcut detection (⌘K on macOS, Ctrl K on Windows/Linux)
+    try {
+        const isMac = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform || navigator.userAgent);
+        const kbd = document.getElementById('gmSearchKbd');
+        if (kbd) kbd.textContent = isMac ? '⌘K' : 'Ctrl K';
+    } catch(e) {}
+
+    // Keep all menu links (Home, About, etc.) visible next to the logo; disable 3-dots collapse
+    function unwrapNavigation() {
+        const nav = document.querySelector('.gh-head-menu .nav');
+        const dropdown = document.querySelector('.gh-dropdown');
+        const toggle = document.querySelector('.nav-more-toggle');
+        if (nav && dropdown) {
+            while (dropdown.firstChild) {
+                nav.insertBefore(dropdown.firstChild, toggle);
+            }
+            if (toggle) toggle.remove();
+        }
+    }
+    window.addEventListener('load', unwrapNavigation);
+    window.addEventListener('resize', () => setTimeout(unwrapNavigation, 20));
+    setTimeout(unwrapNavigation, 100);
+})();
+</script>
+
+{{ghost_foot}}
+
+<!-- Cyber Telemetry Background & Preloader Scripts -->
+<script src="{{asset "built/cyber-hex-bg.js"}}?v=cyber-v4"></script>
+<script src="{{asset "built/cyber-splash.js"}}?v=cyber-v2"></script>
+<script src="{{asset "built/liquidGL.js"}}" defer></script>
+<script src="{{asset "built/cyber-liquid.js"}}?v=cyber-v1" defer></script>
+
+</body>
+</html>

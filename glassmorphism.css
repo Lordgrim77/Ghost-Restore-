@@ -41558,3 +41558,38 @@ html[data-theme="light"] .gm-rss-action-btn:hover {
   background: rgba(0, 0, 0, 0.1) !important;
   color: #000000 !important;
 }
+
+
+/* ========================================================================
+   LIQUID GLASS (liquidGL) INTERACTION & RENDERING RULES
+   ======================================================================== */
+.gm-post-card > *,
+.gm-team-card > *,
+.author-profile > *,
+.gm-author-header > *,
+#gh-head .gh-head-inner > *,
+.gm-theme-toggle > *,
+.gm-newsletter-card > *,
+.gm-rss-modal-card > * {
+  pointer-events: auto !important;
+}
+
+[data-liquid-ignore] {
+  pointer-events: auto;
+}
+
+
+/* High-priority Light Mode Theme Variable Enforcement */
+html.light-mode,
+html[data-theme="light"],
+html.light-mode body,
+html[data-theme="light"] body {
+  --gm-bg: #f8fafc !important;
+  --gm-text-primary: #0f172a !important;
+  --gm-text-secondary: #475569 !important;
+  --gm-text-muted: #64748b !important;
+  --gm-card-bg: rgba(255, 255, 255, 0.82) !important;
+  --gm-head-bg: rgba(255, 255, 255, 0.85) !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
