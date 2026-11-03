@@ -23,6 +23,7 @@ import datetime
 import struct
 import asyncio
 import logging
+import urllib.parse
 from typing import Optional, Dict, Any, List
 from email import policy
 from email.parser import BytesParser
@@ -334,7 +335,7 @@ class SupportVault:
 # =========================================================================
 
 class SupportBotBridge:
-    def __init__(self, application: Application, vault: SupportVault, admin_chat_id: int):
+    def __init__(self, application: Optional[Application], vault: SupportVault, admin_chat_id: int):
         self.app = application
         self.vault = vault
         self.admin_chat_id = admin_chat_id
@@ -342,7 +343,8 @@ class SupportBotBridge:
         self.active_reply_sessions: Dict[int, str] = {}
         # In-memory mapping of telegram message_id -> case_code
         self.msg_to_case: Dict[int, str] = {}
-        self._register_handlers()
+        if self.app:
+            self._register_handlers()
 
     def _register_handlers(self):
         self.app.add_handler(CallbackQueryHandler(self.handle_callback, pattern=r"^case_"))
@@ -424,8 +426,8 @@ class SupportBotBridge:
 
     async def notify_new_case(self, case_data: Dict[str, Any]):
         """Send high-priority alert to the administrator."""
-        if not self.admin_chat_id:
-            logger.warning("No admin_chat_id configured. Skipping Telegram notification.")
+        if not self.app or not self.admin_chat_id:
+            logger.info("Standalone/No-admin mode: skipping Telegram case alert for %s", case_data.get("case_code"))
             return
 
         text = self.format_case_card(case_data)
@@ -444,7 +446,8 @@ class SupportBotBridge:
 
     async def notify_reporter_reply(self, case_code: str, message_text: str):
         """Notify admin when reporter sends a message on the web portal."""
-        if not self.admin_chat_id:
+        if not self.app or not self.admin_chat_id:
+            logger.info("Standalone/No-admin mode: skipping Telegram reporter reply alert for %s", case_code)
             return
 
         text = (
@@ -675,62 +678,101 @@ class SupportApiServer:
 
             # Route handling
             if method == "OPTIONS":
-                await self._send_response(writer, 204, None)
+                header_lines = [
+                    "HTTP/1.1 204 No Content",
+                    "Access-Control-Allow-Origin: *",
+                    "Access-Control-Allow-Methods: GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Forwarded-For",
+                    "Access-Control-Max-Age: 86400",
+                    "Content-Length: 0",
+                    "Connection: close",
+                    "",
+                    ""
+                ]
+                writer.write("\r\n".join(header_lines).encode('utf-8'))
+                await writer.drain()
                 return
 
             clean_path = path.split('?')[0].rstrip('/')
+            route_path = clean_path
+            if route_path.startswith("/api/support"):
+                route_path = route_path[len("/api/support"):]
+            if not route_path.startswith("/"):
+                route_path = "/" + route_path
+
             query = {}
             if '?' in path:
                 qstr = path.split('?', 1)[1]
                 for qitem in qstr.split('&'):
                     if '=' in qitem:
                         k, v = qitem.split('=', 1)
-                        query[k] = v
+                        query[k] = urllib.parse.unquote(v)
 
             # -------------------------------------------------------------
-            # POST /api/support/cases (Case Submission)
+            # GET /ping or /health (Health & Status Check)
             # -------------------------------------------------------------
-            if method == "POST" and clean_path == "/api/support/cases":
+            if method == "GET" and route_path in ("/", "/ping", "/health"):
+                await self._send_response(writer, 200, {
+                    "status": "ok",
+                    "service": "support-hub",
+                    "version": "1.0.0",
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                })
+                return
+
+            # -------------------------------------------------------------
+            # POST /cases (Case Submission - JSON or Multipart)
+            # -------------------------------------------------------------
+            elif method == "POST" and route_path == "/cases":
                 if self._is_rate_limited(client_ip):
-                    await self._send_response(writer, 429, {"error": "Submission rate limit exceeded. Please wait."})
+                    await self._send_response(writer, 429, {"error": "Submission rate limit exceeded. Please wait a while before submitting again."})
                     return
 
                 ctype = headers.get('content-type', '')
                 params = {}
                 evidence_files: List[Dict[str, Any]] = []
 
-                if "multipart/form-data" in ctype:
-                    msg_bytes = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode('utf-8') + body
-                    msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
-                    for part in msg.iter_parts():
-                        name = part.get_param('name', header='content-disposition')
-                        filename = part.get_filename()
-                        payload = part.get_payload(decode=True)
-                        if not payload:
-                            continue
-                        if filename:
-                            evidence_files.append({"filename": filename, "data": payload, "mime": part.get_content_type()})
-                        elif name:
-                            params[name] = payload.decode('utf-8', errors='replace').strip()
-                elif "application/json" in ctype:
+                if "application/json" in ctype:
+                    try:
+                        params = json.loads(body.decode('utf-8'))
+                    except Exception as e:
+                        logger.warning("JSON parse error: %s", e)
+                        await self._send_response(writer, 400, {"error": "Invalid JSON payload."})
+                        return
+                elif "multipart/form-data" in ctype:
+                    try:
+                        msg_bytes = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode('utf-8') + body
+                        msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
+                        for part in msg.iter_parts():
+                            name = part.get_param('name', header='content-disposition')
+                            filename = part.get_filename()
+                            payload = part.get_payload(decode=True)
+                            if not payload:
+                                continue
+                            if filename:
+                                evidence_files.append({"filename": filename, "data": payload, "mime": part.get_content_type()})
+                            elif name:
+                                params[name] = payload.decode('utf-8', errors='replace').strip()
+                    except Exception as e:
+                        logger.warning("Multipart parse error: %s", e)
+                        await self._send_response(writer, 400, {"error": f"Failed to parse multipart upload: {e}"})
+                        return
+                else:
                     try:
                         params = json.loads(body.decode('utf-8'))
                     except Exception:
-                        await self._send_response(writer, 400, {"error": "Invalid JSON"})
+                        await self._send_response(writer, 400, {"error": "Unsupported Content-Type. Please use application/json or multipart/form-data."})
                         return
-                else:
-                    await self._send_response(writer, 400, {"error": "Unsupported Content-Type"})
-                    return
 
                 subject = params.get("subject", "").strip()
                 description = params.get("description", "").strip()
                 category = params.get("category", "Incident Report").strip()
                 priority = params.get("priority", "STANDARD").strip().upper()
-                alias = params.get("reporter_alias", "Anonymous").strip()
+                alias = params.get("reporter_alias", "Anonymous").strip() or "Anonymous"
                 contact = params.get("reporter_contact", "").strip()
 
                 if not subject or not description:
-                    await self._send_response(writer, 400, {"error": "Subject and Description are required."})
+                    await self._send_response(writer, 400, {"error": "Subject and Detailed Description are required fields."})
                     return
 
                 # Create case in DB
@@ -766,10 +808,14 @@ class SupportApiServer:
                 return
 
             # -------------------------------------------------------------
-            # GET /api/support/cases/<case_code> (Fetch Case Status & Chat)
+            # GET /cases/<case_code> (Fetch Case Status & Chat)
             # -------------------------------------------------------------
-            elif method == "GET" and clean_path.startswith("/api/support/cases/"):
-                case_code = clean_path.split("/")[-1]
+            elif method == "GET" and route_path.startswith("/cases/") and not route_path.endswith("/messages"):
+                parts = [p for p in route_path.split("/") if p]
+                if len(parts) < 2:
+                    await self._send_response(writer, 400, {"error": "Invalid case endpoint format."})
+                    return
+                case_code = parts[1]
                 access_key = query.get("key", "").strip()
                 case_data = self.vault.get_case(case_code)
                 if not case_data:
@@ -777,7 +823,7 @@ class SupportApiServer:
                     return
 
                 # Validate access key
-                if case_data["access_key"] != access_key:
+                if not access_key or case_data["access_key"] != access_key:
                     await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
                     return
 
@@ -808,11 +854,14 @@ class SupportApiServer:
                 return
 
             # -------------------------------------------------------------
-            # POST /api/support/cases/<case_code>/messages (Reporter Chat)
+            # POST /cases/<case_code>/messages (Reporter Chat)
             # -------------------------------------------------------------
-            elif method == "POST" and "/messages" in clean_path and clean_path.startswith("/api/support/cases/"):
-                parts = clean_path.split("/")
-                case_code = parts[parts.index("cases") + 1]
+            elif method == "POST" and route_path.startswith("/cases/") and route_path.endswith("/messages"):
+                parts = [p for p in route_path.split("/") if p]
+                if len(parts) < 3:
+                    await self._send_response(writer, 400, {"error": "Invalid message endpoint format."})
+                    return
+                case_code = parts[1]
                 case_data = self.vault.get_case(case_code)
                 if not case_data:
                     await self._send_response(writer, 404, {"error": "Case not found."})
@@ -830,18 +879,28 @@ class SupportApiServer:
                         await self._send_response(writer, 400, {"error": "Invalid JSON"})
                         return
                 elif "multipart/form-data" in ctype:
-                    msg_bytes = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode('utf-8') + body
-                    msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
-                    for part in msg.iter_parts():
-                        name = part.get_param('name', header='content-disposition')
-                        payload = part.get_payload(decode=True)
-                        if name == "message" and payload:
-                            text = payload.decode('utf-8', errors='replace').strip()
-                        elif name == "key" and payload:
-                            key = payload.decode('utf-8', errors='replace').strip()
+                    try:
+                        msg_bytes = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode('utf-8') + body
+                        msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
+                        for part in msg.iter_parts():
+                            name = part.get_param('name', header='content-disposition')
+                            payload = part.get_payload(decode=True)
+                            if name == "message" and payload:
+                                text = payload.decode('utf-8', errors='replace').strip()
+                            elif name == "key" and payload:
+                                key = payload.decode('utf-8', errors='replace').strip()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        p = json.loads(body.decode('utf-8'))
+                        text = p.get("message", "").strip()
+                        key = p.get("key", "").strip()
+                    except Exception:
+                        pass
 
-                if case_data["access_key"] != key:
-                    await self._send_response(writer, 403, {"error": "Invalid or missing Access Key."})
+                if not key or case_data["access_key"] != key:
+                    await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
                     return
 
                 if not text:
@@ -865,7 +924,7 @@ class SupportApiServer:
                 return
 
             else:
-                await self._send_response(writer, 404, {"error": "Endpoint not found."})
+                await self._send_response(writer, 404, {"error": f"Endpoint '{clean_path}' not found."})
 
         except Exception as e:
             logger.error("HTTP request error: %s", e)
@@ -902,7 +961,7 @@ class SupportApiServer:
             "Content-Type: application/json; charset=utf-8",
             "Access-Control-Allow-Origin: *",
             "Access-Control-Allow-Methods: GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Forwarded-For",
             f"Content-Length: {len(body_bytes)}",
             "Connection: close",
             "",
@@ -914,13 +973,13 @@ class SupportApiServer:
 
 
 # =========================================================================
-# Unified Support Hub Initializer
+# Unified Support Hub Initializer & Standalone Runner
 # =========================================================================
 
 def init_support_hub(
-    application: Application,
-    ghost_dir: str,
-    admin_chat_id: int,
+    application: Optional[Application] = None,
+    ghost_dir: str = "/var/www/ghost",
+    admin_chat_id: int = 0,
     port: int = 8080,
     host: str = "127.0.0.1"
 ) -> SupportApiServer:
@@ -929,3 +988,35 @@ def init_support_hub(
     bridge = SupportBotBridge(application=application, vault=vault, admin_chat_id=admin_chat_id)
     server = SupportApiServer(vault=vault, bridge=bridge, host=host, port=port)
     return server
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Support & Evidence Hub API Server")
+    parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    parser.add_argument("--ghost-dir", type=str, default=os.path.abspath(os.path.dirname(__file__)), help="Directory where support_vault is located")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    vault = SupportVault(ghost_dir=args.ghost_dir)
+    bridge = SupportBotBridge(application=None, vault=vault, admin_chat_id=0)
+    server = SupportApiServer(vault=vault, bridge=bridge, host=args.host, port=args.port)
+
+    print("==================================================")
+    print("      Support Hub REST API Server (Standalone)     ")
+    print("==================================================")
+    print(f"Listening on:    http://{args.host}:{args.port}")
+    print(f"Vault Directory: {vault.vault_dir}")
+    print("Health Check:    http://{}:{}/health".format(args.host, args.port))
+    print("--------------------------------------------------")
+    print("Running... Press Ctrl+C to stop.")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(server.start())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("\nStopping Support API server...")
+        loop.run_until_complete(server.stop())

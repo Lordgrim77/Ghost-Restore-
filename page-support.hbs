@@ -170,6 +170,8 @@
                                 <span class="gm-btn-text">Submit Confidential Report</span>
                                 <span class="gm-btn-icon">→</span>
                             </button>
+                            <!-- Diagnostic Alert Box -->
+                            <div id="caseSubmitAlert" class="gm-submit-alert" style="display:none;"></div>
                         </div>
 
                     </form>
@@ -843,6 +845,28 @@ html.light-mode .gm-submit-case-btn:hover {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
+/* Diagnostic Submission Alert */
+.gm-submit-alert {
+    padding: 14px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-top: 14px;
+    display: none;
+    word-break: break-word;
+    text-align: left;
+}
+.gm-submit-alert.error {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid #ef4444;
+    color: #fca5a5;
+}
+html.light-mode .gm-submit-alert.error {
+    background: #fef2f2;
+    border-color: #f87171;
+    color: #991b1b;
+}
+
 /* Success Banner */
 .gm-case-success-card {
     background: #0d1117;
@@ -1407,41 +1431,96 @@ html.light-mode .gm-chat-input {
         renderFileList();
     };
 
+    function showSubmitAlert(msg, isError = true) {
+        const alertBox = document.getElementById('caseSubmitAlert');
+        if (alertBox) {
+            alertBox.className = 'gm-submit-alert ' + (isError ? 'error' : 'info');
+            alertBox.innerHTML = `⚠️ <strong>Submission Error:</strong> ${escapeHtml(msg)}`;
+            alertBox.style.display = 'block';
+            alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    function hideSubmitAlert() {
+        const alertBox = document.getElementById('caseSubmitAlert');
+        if (alertBox) {
+            alertBox.style.display = 'none';
+            alertBox.innerHTML = '';
+        }
+    }
+
     // Case Submission
     window.handleCaseSubmit = async function(e) {
         e.preventDefault();
+        hideSubmitAlert();
+
         const btn = document.getElementById('btnSubmitCase');
+        const category = document.getElementById('caseCategory').value;
+        const prio = document.querySelector('input[name="priority"]:checked');
+        const priority = prio ? prio.value : 'STANDARD';
+        const subject = document.getElementById('caseSubject').value.trim();
+        const description = document.getElementById('caseDescription').value.trim();
+        const isAnon = document.getElementById('anonToggle').checked;
+        const reporterAlias = isAnon ? 'Anonymous' : (document.getElementById('reporterAlias').value.trim() || 'Anonymous');
+        const reporterContact = isAnon ? '' : document.getElementById('reporterContact').value.trim();
+
+        if (!subject || !description) {
+            showSubmitAlert('Subject and Detailed Report are required fields. Please fill them out before submitting.');
+            return;
+        }
+
         btn.disabled = true;
         btn.querySelector('.gm-btn-text').textContent = 'Encrypting & Dispatching...';
 
         try {
-            const formData = new FormData();
-            formData.append('category', document.getElementById('caseCategory').value);
-            const prio = document.querySelector('input[name="priority"]:checked');
-            formData.append('priority', prio ? prio.value : 'STANDARD');
-            formData.append('subject', document.getElementById('caseSubject').value);
-            formData.append('description', document.getElementById('caseDescription').value);
-
-            const isAnon = document.getElementById('anonToggle').checked;
-            if (!isAnon) {
-                formData.append('reporter_alias', document.getElementById('reporterAlias').value);
-                formData.append('reporter_contact', document.getElementById('reporterContact').value);
+            let res;
+            if (selectedFiles.length === 0) {
+                // Direct JSON submission (fast, zero multipart overhead)
+                res = await fetch(`${API_BASE}/cases`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        category: category,
+                        priority: priority,
+                        subject: subject,
+                        description: description,
+                        reporter_alias: reporterAlias,
+                        reporter_contact: reporterContact
+                    })
+                });
             } else {
-                formData.append('reporter_alias', 'Anonymous');
+                // Multipart submission with evidence files
+                const formData = new FormData();
+                formData.append('category', category);
+                formData.append('priority', priority);
+                formData.append('subject', subject);
+                formData.append('description', description);
+                formData.append('reporter_alias', reporterAlias);
+                formData.append('reporter_contact', reporterContact);
+
+                selectedFiles.forEach((file, index) => {
+                    formData.append(`evidence_${index}`, file);
+                });
+
+                res = await fetch(`${API_BASE}/cases`, {
+                    method: 'POST',
+                    body: formData
+                });
             }
 
-            selectedFiles.forEach((file, index) => {
-                formData.append(`evidence_${index}`, file);
-            });
-
-            const res = await fetch(`${API_BASE}/cases`, {
-                method: 'POST',
-                body: formData
-            });
-
             if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || 'Submission failed. Please try again.');
+                let errorMsg = `Server responded with HTTP ${res.status}`;
+                try {
+                    const errData = await res.json();
+                    if (errData && errData.error) errorMsg = errData.error;
+                } catch (_) {
+                    if (res.status === 404) {
+                        errorMsg = 'API route not found (HTTP 404). If testing in production, verify that your Nginx reverse proxy configuration for /api/support/ is active and reloaded (sudo nginx -s reload).';
+                    } else if (res.status === 502 || res.status === 503) {
+                        errorMsg = 'Support Bot daemon is offline (HTTP ' + res.status + '). Ensure your ghost-telegram-bot service is active (sudo systemctl status ghost-telegram-bot).';
+                    }
+                }
+                throw new Error(errorMsg);
             }
 
             const data = await res.json();
@@ -1460,7 +1539,11 @@ html.light-mode .gm-chat-input {
             if (badge) badge.style.display = 'inline-block';
 
         } catch (err) {
-            alert('Submission Error: ' + err.message);
+            let userMsg = err.message;
+            if (err.name === 'TypeError' && err.message.toLowerCase().includes('fetch')) {
+                userMsg = 'Cannot reach Support API server (Connection refused). If testing locally, start the support server on port 8080 (python support_hub.py). If on a remote server, check your Nginx proxy and bot service.';
+            }
+            showSubmitAlert(userMsg);
             btn.disabled = false;
             btn.querySelector('.gm-btn-text').textContent = 'Submit Confidential Report';
         }
@@ -1494,8 +1577,16 @@ html.light-mode .gm-chat-input {
         try {
             const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(code)}?key=${encodeURIComponent(key)}`);
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to load case');
+                let errText = `HTTP ${res.status}`;
+                try {
+                    const err = await res.json();
+                    if (err && err.error) errText = err.error;
+                } catch(_) {
+                    if (res.status === 404) errText = 'Case reference not found. Check the code and try again.';
+                    else if (res.status === 403) errText = 'Invalid Case Access Key. Please check your secret key.';
+                    else if (res.status === 502) errText = 'Support Bot daemon is offline.';
+                }
+                throw new Error(errText);
             }
             const data = await res.json();
             currentCaseCode = code;
@@ -1510,7 +1601,11 @@ html.light-mode .gm-chat-input {
             pollTimer = setInterval(pollCaseUpdates, 3800);
 
         } catch (err) {
-            alert('Lookup Failed: ' + err.message);
+            let msg = err.message;
+            if (err.name === 'TypeError' && err.message.toLowerCase().includes('fetch')) {
+                msg = 'Cannot reach Support API server (Connection refused).';
+            }
+            alert('Lookup Failed: ' + msg);
         }
     }
 
@@ -1631,14 +1726,25 @@ html.light-mode .gm-chat-input {
             });
 
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to send message');
+                let errText = `HTTP ${res.status}`;
+                try {
+                    const err = await res.json();
+                    if (err && err.error) errText = err.error;
+                } catch(_) {
+                    if (res.status === 403) errText = 'Access denied. Invalid Private Access Key.';
+                    else if (res.status === 404) errText = 'Case not found.';
+                }
+                throw new Error(errText);
             }
 
             input.value = '';
             pollCaseUpdates();
         } catch(err) {
-            alert('Message delivery error: ' + err.message);
+            let msg = err.message;
+            if (err.name === 'TypeError' && err.message.toLowerCase().includes('fetch')) {
+                msg = 'Cannot reach Support API server (Connection refused).';
+            }
+            alert('Message delivery error: ' + msg);
         } finally {
             btn.disabled = false;
         }
