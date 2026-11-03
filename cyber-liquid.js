@@ -1,16 +1,15 @@
 /**
- * Cyber Liquid Glass Controller (powered by liquidGL + Lenis)
+ * Cyber Liquid Glass Controller (powered by liquidGL)
  * PedoHunters Custom Alto Theme Design System
  * 
  * High-Performance True Optical Refraction & 60fps Synchronized Scroll:
  *  1. Sticky Navigation Bar Refraction Visor (#gh-head)
- *  2. Post & Feed Cards Refraction Slabs (.gm-post-card)
- *  3. Team & Staff Identity Refraction Badges (.gm-team-card)
- *  4. Author Profile Panoramic Visor (.author-profile / .gm-author-header)
- *  5. Newsletter Subscription Crystal Ribbon (.gm-newsletter-card)
- *  6. RSS Feed Crystalline Modal Shield (.gm-rss-modal-card)
- *  7. Lenis + WebGL Frame-Locked Synchronized Scrolling (zero scroll jitter / lag)
- *  8. Multi-Renderer Snapshot Synchronization for Theme Switches
+ *  2. Mobile Navigation Dropdown Refraction Shield (.gh-head-menu)
+ *  3. Post & Feed Cards Refraction Slabs (.gm-post-card)
+ *  4. Team & Staff Identity Refraction Badges (.gm-team-card)
+ *  5. Author Profile & Hero Cards (.gm-author-hero-card, .gm-author-card)
+ *  6. Newsletter Subscription Crystal Ribbon (.gm-newsletter-card)
+ *  7. RSS Feed Crystalline Modal Shield (.gm-rss-modal-card)
  */
 (function() {
   'use strict';
@@ -95,7 +94,7 @@
     var isLight = getCurrentThemeIsLight();
     var tints = getTints(isLight);
 
-    // 0. Ensure preloader, modals and search overlays are ignored by snapshot
+    // 0. Ensure preloader, modals and background canvas are ignored by snapshot
     var splash = document.getElementById('gm-cyber-splash');
     if (splash) splash.setAttribute('data-liquid-ignore', 'true');
     var sodo = document.getElementById('sodo-search-root');
@@ -103,7 +102,7 @@
     var hexBg = document.getElementById('gm-cyber-hex-canvas');
     if (hexBg) hexBg.setAttribute('data-liquid-ignore', 'true');
 
-    // 1. Sticky Navigation Bar: True Refraction Prism Visor
+    // 1. Sticky Navigation Bar: True Optical Refraction Visor
     var navEl = document.querySelector('#gh-head');
     if (navEl) {
       try {
@@ -111,14 +110,14 @@
           target: '#gh-head',
           snapshot: 'body',
           zIndex: 100,
-          resolution: 1.2,
+          resolution: 1.0,
           content: false,
-          refraction: 0.065,
-          bevelDepth: 0.08,
-          bevelWidth: 0.25,
+          refraction: 0.035,
+          bevelDepth: 0.06,
+          bevelWidth: 0.12,
           frost: 0,
-          magnify: 1.08,
-          aberration: 0.035,
+          magnify: 1.0,
+          aberration: 0.015,
           specular: true,
           shadow: false,
           tint: tints.nav
@@ -129,7 +128,33 @@
       }
     }
 
-    // 2. Feed Post Cards: 60fps Refracting Glass Slabs
+    // 2. Mobile Navigation Dropdown Menu Panel
+    var mobileMenu = document.querySelector('.gh-head-menu');
+    if (mobileMenu) {
+      try {
+        var mobileMenuLens = window.liquidGL({
+          target: '.gh-head-menu',
+          snapshot: 'body',
+          zIndex: 99,
+          resolution: 1.0,
+          content: false,
+          refraction: 0.035,
+          bevelDepth: 0.06,
+          bevelWidth: 0.12,
+          frost: 0,
+          magnify: 1.0,
+          aberration: 0.015,
+          specular: true,
+          shadow: false,
+          tint: tints.nav
+        });
+        registerLens('nav', mobileMenuLens);
+      } catch(e) {
+        console.warn("liquidGL Mobile Nav Menu Init:", e);
+      }
+    }
+
+    // 3. Feed Post Cards: Planar Glass Slabs (Zero Fish-Eye Distortion)
     var postCards = document.querySelectorAll('.gm-post-card');
     if (postCards && postCards.length > 0) {
       try {
@@ -141,15 +166,15 @@
           content: false,
           tilt: false,
           interaction: "fluid",
-          interactionStrength: 1.5,
-          interactionRadius: 0.45,
-          interactionViscosity: 0.55,
-          refraction: 0.075,
-          bevelDepth: 0.08,
-          bevelWidth: 0.28,
+          interactionStrength: 1.0,
+          interactionRadius: 0.35,
+          interactionViscosity: 0.65,
+          refraction: 0.028,
+          bevelDepth: 0.06,
+          bevelWidth: 0.10,
           frost: 0,
-          magnify: 1.10,
-          aberration: 0.035,
+          magnify: 1.0,
+          aberration: 0.015,
           specular: true,
           shadow: false,
           tint: tints.card
@@ -160,57 +185,70 @@
       }
     }
 
-    // 3. Team Member Cards: Cyber ID Badges
-    var teamCards = document.querySelectorAll('.gm-team-card');
-    if (teamCards && teamCards.length > 0) {
+    // 4. Team Member Cards
+    function registerTeamCards() {
+      var teamCards = document.querySelectorAll('.gm-team-card');
+      if (teamCards && teamCards.length > 0 && !activeLenses.some(function(l) { return l.category === 'team'; })) {
+        try {
+          var teamLenses = window.liquidGL({
+            target: '.gm-team-card',
+            snapshot: 'body',
+            zIndex: 2,
+            resolution: 1.0,
+            content: false,
+            tilt: false,
+            interaction: "fluid",
+            interactionStrength: 1.0,
+            interactionRadius: 0.35,
+            interactionViscosity: 0.65,
+            refraction: 0.028,
+            bevelDepth: 0.06,
+            bevelWidth: 0.10,
+            frost: 0,
+            magnify: 1.0,
+            aberration: 0.015,
+            specular: true,
+            shadow: false,
+            tint: tints.team
+          });
+          registerLens('team', teamLenses);
+        } catch(e) {
+          console.warn("liquidGL Team Init:", e);
+        }
+      }
+    }
+    registerTeamCards();
+
+    // Observe team grid in case team-page.js renders cards asynchronously
+    var teamGrid = document.getElementById('gm-team-grid');
+    if (teamGrid) {
+      var teamObserver = new MutationObserver(function() {
+        registerTeamCards();
+      });
+      teamObserver.observe(teamGrid, { childList: true, subtree: true });
+    }
+
+    // 5. Author Showcase Banner & Post Author Profile Cards
+    var authorCards = document.querySelectorAll('.gm-author-hero-card, .author.gm-author-card, .gm-author-card, .gm-author-header, .author-profile');
+    if (authorCards && authorCards.length > 0) {
       try {
-        var teamLenses = window.liquidGL({
-          target: '.gm-team-card',
+        var authorLens = window.liquidGL({
+          target: '.gm-author-hero-card, .author.gm-author-card, .gm-author-card, .gm-author-header, .author-profile',
           snapshot: 'body',
           zIndex: 2,
           resolution: 1.0,
           content: false,
           tilt: false,
           interaction: "fluid",
-          interactionStrength: 1.5,
-          interactionRadius: 0.45,
-          interactionViscosity: 0.55,
-          refraction: 0.075,
-          bevelDepth: 0.08,
-          bevelWidth: 0.28,
+          interactionStrength: 1.0,
+          interactionRadius: 0.35,
+          interactionViscosity: 0.65,
+          refraction: 0.028,
+          bevelDepth: 0.06,
+          bevelWidth: 0.10,
           frost: 0,
-          magnify: 1.10,
-          aberration: 0.035,
-          specular: true,
-          shadow: false,
-          tint: tints.team
-        });
-        registerLens('team', teamLenses);
-      } catch(e) {
-        console.warn("liquidGL Team Init:", e);
-      }
-    }
-
-    // 4. Author Showcase Banner: Panoramic Glass Shield
-    var authorHeader = document.querySelector('.gm-author-header, .author-profile');
-    if (authorHeader) {
-      try {
-        var authorLens = window.liquidGL({
-          target: authorHeader.classList.contains('gm-author-header') ? '.gm-author-header' : '.author-profile',
-          snapshot: 'body',
-          zIndex: 2,
-          resolution: 1.0,
-          content: false,
-          interaction: "fluid",
-          interactionStrength: 1.2,
-          interactionRadius: 0.40,
-          interactionViscosity: 0.60,
-          refraction: 0.060,
-          bevelDepth: 0.07,
-          bevelWidth: 0.24,
-          frost: 0,
-          magnify: 1.08,
-          aberration: 0.030,
+          magnify: 1.0,
+          aberration: 0.015,
           specular: true,
           shadow: false,
           tint: tints.author
@@ -221,7 +259,7 @@
       }
     }
 
-    // 5. Newsletter Subscription Card: Crystalline Energy Ribbon
+    // 6. Newsletter Subscription Card
     var newsletterCard = document.querySelector('.gm-newsletter-card');
     if (newsletterCard) {
       try {
@@ -232,15 +270,15 @@
           resolution: 1.0,
           content: false,
           interaction: "fluid",
-          interactionStrength: 1.2,
-          interactionRadius: 0.40,
-          interactionViscosity: 0.60,
-          refraction: 0.065,
-          bevelDepth: 0.08,
-          bevelWidth: 0.26,
+          interactionStrength: 1.0,
+          interactionRadius: 0.35,
+          interactionViscosity: 0.65,
+          refraction: 0.028,
+          bevelDepth: 0.06,
+          bevelWidth: 0.10,
           frost: 0,
-          magnify: 1.10,
-          aberration: 0.035,
+          magnify: 1.0,
+          aberration: 0.015,
           specular: true,
           shadow: false,
           tint: tints.newsletter
@@ -251,7 +289,7 @@
       }
     }
 
-    // 6. RSS Feed Modal Card
+    // 7. RSS Feed Modal Card
     var rssModal = document.querySelector('.gm-rss-modal-card');
     if (rssModal) {
       try {
@@ -261,12 +299,12 @@
           zIndex: 1000,
           resolution: 1.0,
           content: false,
-          refraction: 0.080,
-          bevelDepth: 0.12,
-          bevelWidth: 0.24,
+          refraction: 0.045,
+          bevelDepth: 0.08,
+          bevelWidth: 0.14,
           frost: 0,
-          magnify: 1.10,
-          aberration: 0.040,
+          magnify: 1.0,
+          aberration: 0.020,
           specular: true,
           reveal: "fade",
           tint: tints.modal

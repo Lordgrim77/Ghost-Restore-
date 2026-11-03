@@ -3147,16 +3147,11 @@
           final.rgb = mix(final.rgb, final.rgb * u_tint.rgb, u_tint.a);
 
           if (u_specular) {
-            vec2 lp1 = vec2(sin(u_time * 0.65), cos(u_time * 0.85)) * 0.55 + 0.5;
-            vec2 lp2 = vec2(sin(u_time * -0.7 + 1.5), cos(u_time * 0.6 - 0.5)) * 0.55 + 0.5;
+            vec2 lp1 = vec2(sin(u_time * 0.2), cos(u_time * 0.3)) * 0.6 + 0.5;
+            vec2 lp2 = vec2(sin(u_time * -0.4 + 1.5), cos(u_time * 0.25 - 0.5)) * 0.6 + 0.5;
             float h = 0.0;
-            h += smoothstep(0.42, 0.0, distance((p_px + b_px) / u_boxSize, lp1)) * 0.22;
-            h += smoothstep(0.48, 0.0, distance((p_px + b_px) / u_boxSize, lp2)) * 0.18;
-            if (u_interactionRadius > 0.0) {
-              vec2 cursorLp = vec2(u_interaction.x, 1.0 - u_interaction.y);
-              float cursorDist = distance((p_px + b_px) / u_boxSize, cursorLp);
-              h += smoothstep(0.38, 0.0, cursorDist) * 0.35;
-            }
+            h += smoothstep(0.4, 0.0, distance((p_px + b_px) / u_boxSize, lp1)) * 0.1;
+            h += smoothstep(0.5, 0.0, distance((p_px + b_px) / u_boxSize, lp2)) * 0.08;
             final.rgb += h * edge;
           }
 
@@ -3929,16 +3924,11 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
   finalCol = vec4<f32>(mix(finalCol.rgb, finalCol.rgb * u.tint.rgb, u.tint.a), finalCol.a);
 
   if (u.specular > 0.5) {
-    let lp1 = vec2<f32>(sin(u.time * 0.65), cos(u.time * 0.85)) * 0.55 + vec2<f32>(0.5);
-    let lp2 = vec2<f32>(sin(u.time * -0.7 + 1.5), cos(u.time * 0.6 - 0.5)) * 0.55 + vec2<f32>(0.5);
+    let lp1 = vec2<f32>(sin(u.time * 0.2), cos(u.time * 0.3)) * 0.6 + vec2<f32>(0.5);
+    let lp2 = vec2<f32>(sin(u.time * -0.4 + 1.5), cos(u.time * 0.25 - 0.5)) * 0.6 + vec2<f32>(0.5);
     var h = 0.0;
-    h = h + smoothstep(0.42, 0.0, distance((p_px + b_px) / u.boxSize, lp1)) * 0.22;
-    h = h + smoothstep(0.48, 0.0, distance((p_px + b_px) / u.boxSize, lp2)) * 0.18;
-    if (u.interactionRadius > 0.0) {
-      let cursorLp = vec2<f32>(u.interaction.x, 1.0 - u.interaction.y);
-      let cursorDist = distance((p_px + b_px) / u.boxSize, cursorLp);
-      h = h + smoothstep(0.38, 0.0, cursorDist) * 0.35;
-    }
+    h = h + smoothstep(0.4, 0.0, distance((p_px + b_px) / u.boxSize, lp1)) * 0.1;
+    h = h + smoothstep(0.5, 0.0, distance((p_px + b_px) / u.boxSize, lp2)) * 0.08;
     finalCol = vec4<f32>(finalCol.rgb + vec3<f32>(h * edge), finalCol.a);
   }
 
@@ -6612,11 +6602,6 @@ fn fs() -> @location(0) vec4<f32> {
       let dx = 0,
         dy = 0;
       const str = unitOption(options.interactionStrength, 0.5, 5);
-      // Ambient harmonic surface undulation (continuous micro-wave so glass never freezes)
-      const phase = ((rect.left || 0) * 0.009 + (rect.top || 0) * 0.006);
-      const ambientMag = (inside ? 0.016 : 0.007) * str;
-      const ambX = Math.sin(now * 0.0022 + phase) * ambientMag;
-      const ambY = Math.cos(now * 0.0019 + phase * 1.3) * ambientMag;
 
       if (inside) {
         if (!state.inside && Math.hypot(value[2], value[3]) < 0.0001) {
@@ -6638,8 +6623,6 @@ fn fs() -> @location(0) vec4<f32> {
         value[0] += (0.5 - value[0]) * follow;
         value[1] += (0.5 - value[1]) * follow;
       }
-      dx += ambX;
-      dy += ambY;
 
       const easing =
         Math.hypot(dx, dy) > Math.hypot(value[2], value[3]) ? follow : settle;

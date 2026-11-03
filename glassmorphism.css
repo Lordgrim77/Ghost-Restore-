@@ -41603,9 +41603,13 @@ html.liquidgl-active .gm-post-card,
 html.liquidgl-active .gm-team-card,
 html.liquidgl-active #gh-head,
 html.liquidgl-active .gm-author-header,
+html.liquidgl-active .gm-author-hero-card,
+html.liquidgl-active .author.gm-author-card,
+html.liquidgl-active .gm-author-card,
 html.liquidgl-active .author-profile,
 html.liquidgl-active .gm-newsletter-card,
-html.liquidgl-active .gm-rss-modal-card {
+html.liquidgl-active .gm-rss-modal-card,
+html.liquidgl-active #gh-head.is-menu-open .gh-head-menu {
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
