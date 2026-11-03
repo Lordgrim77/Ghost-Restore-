@@ -157,6 +157,45 @@ sudo systemctl restart ghost-telegram-bot
 
 ---
 
+## 🛡️ Confidential Support & Incident Portal Hub
+
+The bot includes an asynchronous, zero-dependency Support & Evidence Intake Hub running alongside the Telegram bot.
+
+### Features
+1. **Interactive Ghost Theme Support Portal (`/support/`)**:
+   - **Tab 1: Submit Confidential Report**: Multi-file evidence drag-and-drop dropzone, category selector, triage priority pills (Critical, Urgent, Standard, Low), and optional anonymous mode.
+   - **Tab 2: Track Case & Live Chat**: Authenticated case dashboard by Case Reference Code + 32-character Access Key with local caching, visual status progress stepper, and real-time two-way correspondence.
+2. **Pure Python OpSec Metadata Scrubbing**:
+   - Automatically scrubs `APP1` EXIF / GPS / device metadata from JPEGs and text/ancillary chunks (`tEXt`, `zTXt`, `iTXt`, `eXIf`, `tIME`) from PNGs with zero external C dependencies.
+   - Generates evidentiary SHA-256 integrity checksums for all ingested artifacts.
+3. **Interactive Telegram Bot Triage & Chat Bridge**:
+   - Dispatches instant alerts to the designated administrator chat (`ADMIN_CHAT_ID`).
+   - Interactive inline keyboard actions:
+     - `[ 🔍 In Review ]`: Transitions case to active investigation.
+     - `[ ✅ Mark Closed ]`: Marks incident as resolved with audit log.
+     - `[ ❌ Mark Rejected ]`: Dismisses report with audit trail.
+     - `[ 💬 Reply to Reporter ]`: Initiates direct two-way messaging delivered to the reporter's live web portal.
+     - `[ 📥 Evidence ]`: Dispatches scrubbed evidence files directly to Telegram.
+4. **Automated Backup Integration**:
+   - Case records and evidence artifacts are stored inside `/var/www/ghost/support_vault/`, ensuring they are automatically protected and captured during every backup snapshot!
+
+### Nginx Production Reverse Proxy Setup
+Add this block to your Ghost publication's Nginx configuration (e.g. `/etc/nginx/sites-available/yourdomain.com.conf`):
+
+```nginx
+# Proxy Support Hub API to the Python Telegram daemon on port 8080
+location /api/support/ {
+    proxy_pass http://127.0.0.1:8080/api/support/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 50M;
+}
+```
+
+---
+
 ## 🗑️ Uninstallation
 
 To remove the bot and systemd service completely:

@@ -267,6 +267,11 @@ class GhostManager:
             if os.path.exists(src_settings):
                 shutil.copytree(src_settings, os.path.join(staging_content, "settings"), dirs_exist_ok=True)
 
+            # Backup Support Vault (Database & Evidence Artifacts)
+            src_vault = os.path.join(self.ghost_dir, "support_vault")
+            if os.path.exists(src_vault):
+                shutil.copytree(src_vault, os.path.join(staging_dir, "support_vault"), dirs_exist_ok=True)
+
             # Copy config file
             cfg_path = self.get_config_path()
             if cfg_path and os.path.exists(cfg_path):
@@ -388,6 +393,18 @@ class GhostManager:
             staging_settings = os.path.join(staging_content, "settings")
             if os.path.exists(staging_settings):
                 shutil.copytree(staging_settings, os.path.join(target_content, "settings"), dirs_exist_ok=True)
+
+            # Restore Support Vault (Database & Evidence Artifacts)
+            staging_vault = os.path.join(staging_dir, "support_vault")
+            if os.path.exists(staging_vault):
+                target_vault = os.path.join(self.ghost_dir, "support_vault")
+                os.makedirs(target_vault, exist_ok=True)
+                for root, dirs, files in os.walk(staging_vault):
+                    rel = os.path.relpath(root, staging_vault)
+                    dest_dir = os.path.join(target_vault, rel)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    for f in files:
+                        shutil.copy2(os.path.join(root, f), os.path.join(dest_dir, f))
 
             # 5. Restore Database
             notify("💾 [5/6] Restoring database content...")

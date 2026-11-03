@@ -23,6 +23,7 @@ from telegram import (
 )
 from telegram.constants import ParseMode
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
@@ -32,6 +33,7 @@ from telegram.ext import (
 )
 
 from ghost_manager import GhostManager
+from support_hub import init_support_hub, SupportApiServer
 
 # Setup Logging
 logging.basicConfig(
@@ -50,6 +52,12 @@ ALLOWED_USER_IDS = [
 ]
 GHOST_DIR = os.getenv("GHOST_DIR", "/var/www/ghost")
 BACKUPS_DIR = os.getenv("BACKUPS_DIR", os.path.join(GHOST_DIR, "backups"))
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", ALLOWED_USER_IDS[0] if ALLOWED_USER_IDS else 0))
+SUPPORT_PORT = int(os.getenv("SUPPORT_PORT", 8080))
+SUPPORT_HOST = os.getenv("SUPPORT_HOST", "127.0.0.1")
+
+# Global reference to Support REST API daemon
+support_api_server: SupportApiServer = None
 
 # Initialize Ghost Manager
 ghost_mgr = GhostManager(ghost_dir=GHOST_DIR, backups_dir=BACKUPS_DIR)
@@ -90,7 +98,10 @@ def get_main_menu_keyboard():
             InlineKeyboardButton("📑 List Backups", callback_data="menu_backups_list"),
         ],
         [
+            InlineKeyboardButton("🛡️ Support Cases", callback_data="menu_cases_list"),
             InlineKeyboardButton("🔄 Restart Ghost", callback_data="menu_restart_confirm"),
+        ],
+        [
             InlineKeyboardButton("ℹ️ Help & Info", callback_data="menu_help"),
         ],
     ]
@@ -477,7 +488,52 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # 8. HELP & INFO
+    # 8. SUPPORT & INCIDENT CASES
+    elif data == "menu_cases_list":
+        if not support_api_server or not support_api_server.vault:
+            await query.edit_message_text(
+                "⚠️ *Support Hub Vault is initializing or offline.*",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        cases = support_api_server.vault.list_recent_cases(limit=8)
+        if not cases:
+            text = (
+                "🛡️ *Confidential Support & Incident Cases*\n\n"
+                "ℹ️ No cases currently recorded.\n"
+                "New submissions from the `/support/` portal will alert you directly here in real time."
+            )
+            keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        text = (
+            "🛡️ *Confidential Support & Incident Cases*\n\n"
+            "Select an incident case to review, download evidence, or message the reporter:"
+        )
+        keyboard = []
+        for c in cases:
+            status_tag = "🟡" if c["status"] == "SUBMITTED" else ("🟠" if c["status"] == "IN_REVIEW" else "🟢")
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{status_tag} #{c['case_code']} - {c['subject'][:22]}",
+                    callback_data=f"case_view:{c['case_code']}"
+                )
+            ])
+        keyboard.append([InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")])
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    # 9. HELP & INFO
     elif data == "menu_help":
         help_text = (
             "ℹ️ *Ghost Telegram Bot Help*\n\n"
@@ -486,6 +542,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "If under 48 MB, sends it directly in this chat!\n\n"
             "• *♻️ Restore Backup:* Restores a saved backup. Auto-fixes path slashes, protects default "
             "Ghost theme symlinks (`casper`/`source`), syncs database, and restarts Ghost.\n\n"
+            "• *🛡️ Support & Incident Cases:* View confidential incident cases submitted via the `/support/` portal, "
+            "inspect metadata-scrubbed evidence files, update status (In Review, Closed, Rejected), and chat directly with reporters.\n\n"
             "• *🔗 URL Download:* Send `/url <link>` to download and restore any backup hosted online "
             "(Google Drive, Dropbox, file.io, etc.).\n\n"
             "• *📁 Local Restore:* Send `/restore /path/to/backup.zip` to restore any file on the server.\n\n"
@@ -685,6 +743,34 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 
+async def post_init(application: Application):
+    """Start Support Hub API server and register bot bridge on the asyncio event loop."""
+    global support_api_server
+    try:
+        support_api_server = init_support_hub(
+            application=application,
+            ghost_dir=GHOST_DIR,
+            admin_chat_id=ADMIN_CHAT_ID,
+            port=SUPPORT_PORT,
+            host=SUPPORT_HOST,
+        )
+        await support_api_server.start()
+        logger.info(f"Support REST API daemon listening on http://{SUPPORT_HOST}:{SUPPORT_PORT}")
+    except Exception as e:
+        logger.error(f"Failed to start Support API server: {e}")
+
+
+async def post_shutdown(application: Application):
+    """Gracefully shutdown Support Hub API server."""
+    global support_api_server
+    if support_api_server:
+        try:
+            await support_api_server.stop()
+            logger.info("Support REST API daemon stopped.")
+        except Exception as e:
+            logger.error(f"Error stopping Support API server: {e}")
+
+
 def main():
     """Start the Telegram bot application."""
     if not BOT_TOKEN or BOT_TOKEN == "your_bot_token_here":
@@ -698,10 +784,18 @@ def main():
     print(f"Ghost Directory:     {GHOST_DIR}")
     print(f"Backups Directory:   {BACKUPS_DIR}")
     print(f"Authorized User IDs: {ALLOWED_USER_IDS or 'All Users (Open)'}")
+    print(f"Admin Alert Chat ID: {ADMIN_CHAT_ID or 'Not Set'}")
+    print(f"Support REST API:    http://{SUPPORT_HOST}:{SUPPORT_PORT}")
     print("--------------------------------------------------")
     print("Bot is starting polling...")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
 
     # Handlers
     app.add_handler(CommandHandler(["start", "menu"], start_command))

@@ -1,0 +1,1527 @@
+{{!< default}}
+
+<div class="content-area">
+    <main class="site-main">
+
+        <section class="gm-support-section">
+            <div class="gm-support-container">
+
+                <!-- Header / Hero -->
+                <div class="gm-support-header">
+                    <span class="gm-section-badge">Verified Communications & Evidence Vault</span>
+                    <h1 class="gm-support-title">Confidential Support & Incident Intake</h1>
+                    <p class="gm-support-desc">
+                        Direct, cryptographically secured portal for incident triage, digital evidence submissions, and real-time correspondence with our verified investigative team.
+                    </p>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <div class="gm-support-tabs">
+                    <button type="button" class="gm-support-tab active" id="tabBtnSubmit" onclick="switchSupportTab('submit')">
+                        <span class="gm-tab-icon">🛡️</span>
+                        <span>Submit New Report</span>
+                    </button>
+                    <button type="button" class="gm-support-tab" id="tabBtnTrack" onclick="switchSupportTab('track')">
+                        <span class="gm-tab-icon">🔍</span>
+                        <span>Track Case &amp; Live Chat</span>
+                        <span class="gm-tab-badge" id="activeCaseBadge" style="display:none;">Active</span>
+                    </button>
+                </div>
+
+                <!-- ============================================================= -->
+                <!-- TAB 1: NEW CASE SUBMISSION FORM -->
+                <!-- ============================================================= -->
+                <div class="gm-support-panel active" id="panelSubmit">
+                    <form id="gmSupportForm" class="gm-support-form" onsubmit="handleCaseSubmit(event)">
+                        
+                        <!-- Row 1: Category & Priority -->
+                        <div class="gm-form-row gm-form-grid-2">
+                            <div class="gm-form-group">
+                                <label for="caseCategory" class="gm-form-label">Incident Category <span class="gm-required">*</span></label>
+                                <select id="caseCategory" name="category" class="gm-form-select" required>
+                                    <option value="Incident &amp; Abuse Report">Incident &amp; Abuse Report</option>
+                                    <option value="Predator Grooming &amp; Exploitation">Predator Grooming &amp; Exploitation</option>
+                                    <option value="Evidence &amp; Forensic Artifacts">Evidence &amp; Forensic Artifacts</option>
+                                    <option value="Threat Intelligence &amp; Infiltration Tip">Threat Intelligence &amp; Infiltration Tip</option>
+                                    <option value="Administrative &amp; Support Inquiry">Administrative &amp; Support Inquiry</option>
+                                </select>
+                            </div>
+
+                            <div class="gm-form-group">
+                                <label class="gm-form-label">Triage Priority <span class="gm-required">*</span></label>
+                                <div class="gm-priority-selector">
+                                    <label class="gm-priority-pill priority-critical">
+                                        <input type="radio" name="priority" value="CRITICAL">
+                                        <span class="gm-priority-indicator"></span>
+                                        <span>Critical</span>
+                                    </label>
+                                    <label class="gm-priority-pill priority-urgent">
+                                        <input type="radio" name="priority" value="URGENT">
+                                        <span class="gm-priority-indicator"></span>
+                                        <span>Urgent</span>
+                                    </label>
+                                    <label class="gm-priority-pill priority-standard active">
+                                        <input type="radio" name="priority" value="STANDARD" checked>
+                                        <span class="gm-priority-indicator"></span>
+                                        <span>Standard</span>
+                                    </label>
+                                    <label class="gm-priority-pill priority-low">
+                                        <input type="radio" name="priority" value="LOW">
+                                        <span class="gm-priority-indicator"></span>
+                                        <span>Low</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Subject -->
+                        <div class="gm-form-group">
+                            <label for="caseSubject" class="gm-form-label">Subject / Incident Summary <span class="gm-required">*</span></label>
+                            <input type="text" id="caseSubject" name="subject" class="gm-form-input" placeholder="Concise summary of the situation or evidence..." required maxlength="180">
+                        </div>
+
+                        <!-- Description Narrative -->
+                        <div class="gm-form-group">
+                            <label for="caseDescription" class="gm-form-label">Comprehensive Details &amp; Narrative <span class="gm-required">*</span></label>
+                            <textarea id="caseDescription" name="description" class="gm-form-textarea" rows="6" placeholder="Provide full context, handles, platform URLs, timestamps, sequence of events, and specific details..." required></textarea>
+                            <span class="gm-form-hint">Do not include your own personal information here if you wish to remain strictly anonymous.</span>
+                        </div>
+
+                        <!-- Evidence File Dropzone -->
+                        <div class="gm-form-group">
+                            <label class="gm-form-label">Digital Evidence &amp; Artifact Attachments</label>
+                            <div class="gm-dropzone" id="gmDropzone" onclick="document.getElementById('evidenceFileInput').click()">
+                                <input type="file" id="evidenceFileInput" multiple style="display:none;" onchange="handleFileSelect(event)" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.log,.mp4,.zip">
+                                <div class="gm-dropzone-content">
+                                    <div class="gm-dropzone-icon">
+                                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="17 8 12 3 7 8"></polyline>
+                                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                                        </svg>
+                                    </div>
+                                    <p class="gm-dropzone-title">Click to upload evidence or drag &amp; drop files</p>
+                                    <p class="gm-dropzone-sub">Supported: Screenshots, PDFs, Chat Exports, Logs, Media (Max 50MB per file)</p>
+                                </div>
+                            </div>
+
+                            <!-- Selected Files List -->
+                            <div class="gm-file-list" id="gmFileList" style="display:none;"></div>
+                        </div>
+
+                        <!-- Reporter Identity & OpSec Option -->
+                        <div class="gm-form-card">
+                            <div class="gm-checkbox-row">
+                                <label class="gm-checkbox-label">
+                                    <input type="checkbox" id="anonToggle" checked onchange="toggleAnonFields(this.checked)">
+                                    <span class="gm-custom-checkbox"></span>
+                                    <span class="gm-checkbox-text">
+                                        <strong>Submit Anonymously (Zero Personal Identifying Information)</strong>
+                                        <small>A private cryptographic Case ID and Access Key will be generated so you can track progress and chat without an account.</small>
+                                    </span>
+                                </label>
+                            </div>
+
+                            <div class="gm-anon-fields" id="anonFields" style="display:none;">
+                                <div class="gm-form-row gm-form-grid-2">
+                                    <div class="gm-form-group">
+                                        <label for="reporterAlias" class="gm-form-label">Contact Alias (Optional)</label>
+                                        <input type="text" id="reporterAlias" name="reporter_alias" class="gm-form-input" placeholder="e.g. Whistleblower_01">
+                                    </div>
+                                    <div class="gm-form-group">
+                                        <label for="reporterContact" class="gm-form-label">External Contact (Optional)</label>
+                                        <input type="text" id="reporterContact" name="reporter_contact" class="gm-form-input" placeholder="Telegram handle or secure email">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- OpSec Security Assurances -->
+                        <div class="gm-opsec-badges">
+                            <div class="gm-opsec-item">
+                                <span class="gm-opsec-icon">🛡️</span>
+                                <span><strong>EXIF/GPS Purged:</strong> Metadata automatically scrubbed from media.</span>
+                            </div>
+                            <div class="gm-opsec-item">
+                                <span class="gm-opsec-icon">🔒</span>
+                                <span><strong>Evidentiary Hashes:</strong> SHA-256 fingerprint generated upon intake.</span>
+                            </div>
+                            <div class="gm-opsec-item">
+                                <span class="gm-opsec-icon">⚡</span>
+                                <span><strong>Direct Triage:</strong> Secure alerts dispatched to verified administrators.</span>
+                            </div>
+                        </div>
+
+                        <!-- Submit Button -->
+                        <div class="gm-form-actions">
+                            <button type="submit" class="gm-submit-case-btn" id="btnSubmitCase">
+                                <span class="gm-btn-text">Submit Confidential Report</span>
+                                <span class="gm-btn-icon">→</span>
+                            </button>
+                        </div>
+
+                    </form>
+
+                    <!-- Success Confirmation Banner (Hidden by default) -->
+                    <div class="gm-case-success-card" id="caseSuccessCard" style="display:none;">
+                        <div class="gm-success-badge">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                            </svg>
+                        </div>
+                        <h2 class="gm-success-title">Report Successfully Dispatched</h2>
+                        <p class="gm-success-desc">
+                            Your submission has been securely ingested, stripped of metadata, and transmitted to duty administrators on Telegram.
+                        </p>
+
+                        <div class="gm-credentials-box">
+                            <div class="gm-credential-item">
+                                <span class="gm-credential-label">CASE REFERENCE CODE</span>
+                                <div class="gm-credential-val-row">
+                                    <code class="gm-credential-code" id="resCaseCode">CASE-XXXX-XXXX</code>
+                                    <button type="button" class="gm-copy-btn" onclick="copyText('resCaseCode')">Copy</button>
+                                </div>
+                            </div>
+                            <div class="gm-credential-item">
+                                <span class="gm-credential-label">PRIVATE ACCESS KEY</span>
+                                <div class="gm-credential-val-row">
+                                    <code class="gm-credential-code" id="resAccessKey">xxxxxxxxxxxxxxxx</code>
+                                    <button type="button" class="gm-copy-btn" onclick="copyText('resAccessKey')">Copy</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="gm-success-warning">
+                            <strong>⚠️ Important:</strong> Bookmark this page or save your <strong>Case Reference Code</strong> and <strong>Access Key</strong> now. They are strictly required to track status updates and participate in two-way investigator chat.
+                        </div>
+
+                        <div class="gm-success-actions">
+                            <button type="button" class="gm-view-case-btn" onclick="openActiveCaseDashboard()">
+                                <span>Open Case Dashboard &amp; Live Chat</span> →
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ============================================================= -->
+                <!-- TAB 2: CASE TRACKING & BI-DIRECTIONAL LIVE CHAT -->
+                <!-- ============================================================= -->
+                <div class="gm-support-panel" id="panelTrack">
+
+                    <!-- Case Credentials Lookup Box -->
+                    <div class="gm-lookup-card" id="gmLookupCard">
+                        <h3 class="gm-lookup-title">Access Existing Case</h3>
+                        <p class="gm-lookup-sub">Enter your Case Reference Code and Private Access Key to view status dispatches and communicate with investigators.</p>
+                        
+                        <div class="gm-form-row gm-form-grid-2">
+                            <div class="gm-form-group">
+                                <label for="lookupCaseCode" class="gm-form-label">Case Reference Code</label>
+                                <input type="text" id="lookupCaseCode" class="gm-form-input" placeholder="e.g. CASE-4892-F91A">
+                            </div>
+                            <div class="gm-form-group">
+                                <label for="lookupAccessKey" class="gm-form-label">Private Access Key</label>
+                                <input type="text" id="lookupAccessKey" class="gm-form-input" placeholder="32-character secret key">
+                            </div>
+                        </div>
+
+                        <div class="gm-lookup-actions">
+                            <button type="button" class="gm-lookup-btn" onclick="loadCaseFromInputs()">
+                                <span>Access Case</span> →
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Active Case Dashboard Container (Hidden until case loaded) -->
+                    <div class="gm-case-dashboard" id="gmCaseDashboard" style="display:none;">
+
+                        <!-- Case Summary Ribbon -->
+                        <div class="gm-case-summary-card">
+                            <div class="gm-case-top-row">
+                                <div class="gm-case-title-wrap">
+                                    <span class="gm-case-code-badge" id="dashCaseCode">CASE-XXXX-XXXX</span>
+                                    <span class="gm-priority-badge" id="dashPriority">STANDARD</span>
+                                    <span class="gm-category-badge" id="dashCategory">Incident Report</span>
+                                </div>
+                                <div class="gm-case-status-wrap">
+                                    <div class="gm-status-pill status-submitted" id="dashStatusPill">
+                                        <span class="gm-status-dot"></span>
+                                        <span id="dashStatusText">SUBMITTED</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h2 class="gm-case-subject" id="dashSubject">Case Subject</h2>
+                            <p class="gm-case-description" id="dashDescription">Case details...</p>
+
+                            <!-- Visual Status Progress Stepper -->
+                            <div class="gm-status-stepper">
+                                <div class="gm-stepper-step step-submitted active" id="stepSubmitted">
+                                    <div class="gm-stepper-circle">1</div>
+                                    <div class="gm-stepper-label">Submitted</div>
+                                </div>
+                                <div class="gm-stepper-line" id="line1"></div>
+                                <div class="gm-stepper-step step-review" id="stepReview">
+                                    <div class="gm-stepper-circle">2</div>
+                                    <div class="gm-stepper-label">In Review</div>
+                                </div>
+                                <div class="gm-stepper-line" id="line2"></div>
+                                <div class="gm-stepper-step step-resolution" id="stepResolution">
+                                    <div class="gm-stepper-circle">3</div>
+                                    <div class="gm-stepper-label">Resolution</div>
+                                </div>
+                            </div>
+
+                            <!-- Resolution Notice Banner (if closed/rejected) -->
+                            <div class="gm-resolution-banner" id="dashResolutionBanner" style="display:none;">
+                                <strong id="dashResolutionTitle">Case Closed:</strong>
+                                <span id="dashResolutionNote">Resolved by investigation team.</span>
+                            </div>
+
+                            <!-- Evidence Files Summary -->
+                            <div class="gm-case-evidence-section" id="dashEvidenceSection">
+                                <h4 class="gm-evidence-title">Verified Evidence Attachments</h4>
+                                <div class="gm-evidence-grid" id="dashEvidenceList"></div>
+                            </div>
+                        </div>
+
+                        <!-- Bi-Directional Live Chat Container -->
+                        <div class="gm-chat-card">
+                            <div class="gm-chat-header">
+                                <div class="gm-chat-header-left">
+                                    <span class="gm-chat-indicator"></span>
+                                    <h3 class="gm-chat-title">Investigator Correspondence</h3>
+                                </div>
+                                <span class="gm-chat-sync-text">Live Sync with Telegram Hub</span>
+                            </div>
+
+                            <!-- Chat Message Stream -->
+                            <div class="gm-chat-messages" id="gmChatMessages">
+                                <div class="gm-chat-empty" id="chatEmptyState">
+                                    <span>Case registered. Awaiting initial investigator response.</span>
+                                </div>
+                            </div>
+
+                            <!-- Chat Message Composer -->
+                            <form class="gm-chat-composer" id="gmChatComposer" onsubmit="handleSendMessage(event)">
+                                <input type="text" id="chatInputText" class="gm-chat-input" placeholder="Type a message or follow-up evidence to investigators..." autocomplete="off" required>
+                                <button type="submit" class="gm-chat-send-btn" id="btnSendChat">
+                                    <span>Send</span>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                    </svg>
+                                </button>
+                            </form>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<!-- Support Portal Styles -->
+<style>
+.gm-support-section {
+    padding: 48px 24px 80px;
+    max-width: 1040px;
+    margin: 0 auto;
+    width: 100%;
+}
+.gm-support-header {
+    text-align: center;
+    margin-bottom: 36px;
+}
+.gm-section-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    margin-bottom: 14px;
+}
+html.dark-mode .gm-section-badge {
+    background: rgba(255, 255, 255, 0.08);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+}
+html.light-mode .gm-section-badge {
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.gm-support-title {
+    font-size: clamp(28px, 4vw, 42px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    margin-bottom: 12px;
+}
+.gm-support-desc {
+    max-width: 640px;
+    margin: 0 auto;
+    font-size: 16px;
+    line-height: 1.6;
+    color: #94a3b8;
+}
+html.light-mode .gm-support-desc { color: #64748b; }
+
+/* Tabs */
+.gm-support-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 32px;
+}
+.gm-support-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid transparent;
+}
+html.dark-mode .gm-support-tab {
+    background: rgba(255, 255, 255, 0.05);
+    color: #94a3b8;
+    border-color: rgba(255, 255, 255, 0.1);
+}
+html.dark-mode .gm-support-tab.active,
+html.dark-mode .gm-support-tab:hover {
+    background: #ffffff;
+    color: #040609;
+    border-color: #ffffff;
+}
+html.light-mode .gm-support-tab {
+    background: #f1f5f9;
+    color: #64748b;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+html.light-mode .gm-support-tab.active,
+html.light-mode .gm-support-tab:hover {
+    background: #090b10;
+    color: #ffffff;
+    border-color: #090b10;
+}
+.gm-tab-badge {
+    background: #10b981;
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 999px;
+    text-transform: uppercase;
+}
+
+/* Panels */
+.gm-support-panel { display: none; }
+.gm-support-panel.active { display: block; animation: gmFadeIn 0.25s ease; }
+@keyframes gmFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Form Elements */
+.gm-support-form {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 32px;
+}
+html.light-mode .gm-support-form {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.05);
+}
+.gm-form-group { margin-bottom: 24px; }
+.gm-form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 8px;
+}
+.gm-required { color: #e11d48; }
+.gm-form-hint {
+    display: block;
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 6px;
+}
+.gm-form-input, .gm-form-select, .gm-form-textarea {
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 14px;
+    border-radius: 10px;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+html.dark-mode .gm-form-input,
+html.dark-mode .gm-form-select,
+html.dark-mode .gm-form-textarea {
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #f8fafc;
+}
+html.dark-mode .gm-form-input:focus,
+html.dark-mode .gm-form-select:focus,
+html.dark-mode .gm-form-textarea:focus {
+    border-color: #ffffff;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+}
+html.light-mode .gm-form-input,
+html.light-mode .gm-form-select,
+html.light-mode .gm-form-textarea {
+    background: #f8fafc;
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    color: #0f172a;
+}
+html.light-mode .gm-form-input:focus,
+html.light-mode .gm-form-select:focus,
+html.light-mode .gm-form-textarea:focus {
+    border-color: #000000;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+.gm-form-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+@media (max-width: 680px) {
+    .gm-form-grid-2 { grid-template-columns: 1fr; }
+}
+
+/* Priority Selector Pills */
+.gm-priority-selector {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}
+@media (max-width: 480px) {
+    .gm-priority-selector { grid-template-columns: 1fr 1fr; }
+}
+.gm-priority-pill {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+.gm-priority-pill input { display: none; }
+.gm-priority-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.priority-critical .gm-priority-indicator { background: #e11d48; }
+.priority-urgent .gm-priority-indicator { background: #f97316; }
+.priority-standard .gm-priority-indicator { background: #eab308; }
+.priority-low .gm-priority-indicator { background: #64748b; }
+
+html.dark-mode .gm-priority-pill {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+}
+html.dark-mode .gm-priority-pill:has(input:checked) {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: #ffffff;
+    color: #ffffff;
+}
+html.light-mode .gm-priority-pill {
+    background: #f1f5f9;
+    border-color: rgba(0, 0, 0, 0.06);
+    color: #64748b;
+}
+html.light-mode .gm-priority-pill:has(input:checked) {
+    background: #ffffff;
+    border-color: #000000;
+    color: #000000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* Dropzone */
+.gm-dropzone {
+    border: 2px dashed rgba(255, 255, 255, 0.18);
+    border-radius: 14px;
+    padding: 32px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: rgba(255, 255, 255, 0.015);
+}
+html.light-mode .gm-dropzone {
+    border-color: rgba(0, 0, 0, 0.18);
+    background: #f8fafc;
+}
+.gm-dropzone:hover {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.04);
+}
+.gm-dropzone-icon {
+    margin-bottom: 10px;
+    color: #10b981;
+}
+.gm-dropzone-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+.gm-dropzone-sub {
+    font-size: 12px;
+    color: #94a3b8;
+    margin: 0;
+}
+
+/* File list */
+.gm-file-list {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.gm-file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    font-size: 13px;
+}
+html.light-mode .gm-file-item {
+    background: #f1f5f9;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+.gm-file-remove {
+    background: transparent;
+    border: none;
+    color: #e11d48;
+    cursor: pointer;
+    font-weight: 700;
+    padding: 2px 8px;
+}
+
+/* Form Card Checkbox */
+.gm-form-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 24px;
+}
+html.light-mode .gm-form-card {
+    background: #f8fafc;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+.gm-checkbox-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+}
+.gm-checkbox-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
+.gm-checkbox-text small { display: block; font-size: 12px; color: #94a3b8; }
+html.light-mode .gm-checkbox-text small { color: #64748b; }
+.gm-anon-fields { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+html.light-mode .gm-anon-fields { border-top-color: rgba(0, 0, 0, 0.08); }
+
+/* OpSec Badges */
+.gm-opsec-badges {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+}
+@media (max-width: 768px) {
+    .gm-opsec-badges { grid-template-columns: 1fr; }
+}
+.gm-opsec-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+html.light-mode .gm-opsec-item {
+    background: #f8fafc;
+    border-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Submit Button */
+.gm-submit-case-btn {
+    width: 100%;
+    padding: 16px 28px;
+    font-size: 15px;
+    font-weight: 800;
+    border-radius: 999px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    border: none;
+}
+html.dark-mode .gm-submit-case-btn {
+    background: #ffffff;
+    color: #040609 !important;
+}
+html.dark-mode .gm-submit-case-btn * {
+    color: #040609 !important;
+}
+html.dark-mode .gm-submit-case-btn:hover {
+    background: #e2e8f0;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(255, 255, 255, 0.2);
+}
+html.light-mode .gm-submit-case-btn {
+    background: #090b10;
+    color: #ffffff !important;
+}
+html.light-mode .gm-submit-case-btn * {
+    color: #ffffff !important;
+}
+html.light-mode .gm-submit-case-btn:hover {
+    background: #1e293b;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+/* Success Card */
+.gm-case-success-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid #10b981;
+    border-radius: 20px;
+    padding: 40px 32px;
+    text-align: center;
+    animation: gmFadeIn 0.3s ease;
+}
+.gm-success-badge { margin-bottom: 16px; }
+.gm-success-title { font-size: 26px; font-weight: 800; margin-bottom: 8px; }
+.gm-success-desc { max-width: 580px; margin: 0 auto 28px; color: #94a3b8; font-size: 15px; line-height: 1.6; }
+
+.gm-credentials-box {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    max-width: 680px;
+    margin: 0 auto 24px;
+    text-align: left;
+}
+@media (max-width: 600px) {
+    .gm-credentials-box { grid-template-columns: 1fr; }
+}
+.gm-credential-item {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+html.light-mode .gm-credential-item {
+    background: #f1f5f9;
+    border-color: rgba(0, 0, 0, 0.12);
+}
+.gm-credential-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #94a3b8;
+    margin-bottom: 6px;
+}
+.gm-credential-val-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.gm-credential-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 15px;
+    font-weight: 800;
+    color: #10b981;
+}
+.gm-copy-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+html.light-mode .gm-copy-btn {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.15);
+    color: #0f172a;
+}
+.gm-success-warning {
+    background: rgba(234, 179, 8, 0.1);
+    border: 1px solid rgba(234, 179, 8, 0.3);
+    color: #facc15;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 12px 18px;
+    border-radius: 10px;
+    max-width: 680px;
+    margin: 0 auto 28px;
+    text-align: left;
+}
+.gm-view-case-btn {
+    background: #10b981;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 14px 28px;
+    border-radius: 999px;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+.gm-view-case-btn:hover {
+    background: #059669;
+    transform: translateY(-2px);
+}
+
+/* ============================================================= */
+/* Tab 2: Case Tracker & Chat */
+/* ============================================================= */
+.gm-lookup-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 28px;
+    margin-bottom: 28px;
+}
+html.light-mode .gm-lookup-card {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+}
+.gm-lookup-title { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+.gm-lookup-sub { font-size: 14px; color: #94a3b8; margin-bottom: 20px; }
+.gm-lookup-btn {
+    padding: 12px 28px;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #040609 !important;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+.gm-lookup-btn * {
+    color: #040609 !important;
+}
+html.light-mode .gm-lookup-btn {
+    background: #090b10;
+    color: #ffffff !important;
+}
+html.light-mode .gm-lookup-btn * {
+    color: #ffffff !important;
+}
+
+/* Dashboard Summary Card */
+.gm-case-summary-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    padding: 28px;
+    margin-bottom: 24px;
+}
+html.light-mode .gm-case-summary-card {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.1);
+}
+.gm-case-top-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+.gm-case-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.gm-case-code-badge {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 800;
+    font-size: 15px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+html.light-mode .gm-case-code-badge {
+    background: #f1f5f9;
+    border-color: rgba(0, 0, 0, 0.12);
+}
+.gm-priority-badge {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 4px 10px;
+    border-radius: 6px;
+    text-transform: uppercase;
+}
+.priority-CRITICAL { background: rgba(225, 29, 72, 0.15); color: #f43f5e; border: 1px solid #e11d48; }
+.priority-URGENT { background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid #f97316; }
+.priority-STANDARD { background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid #eab308; }
+.priority-LOW { background: rgba(100, 116, 139, 0.15); color: #cbd5e1; border: 1px solid #64748b; }
+
+.gm-category-badge {
+    font-size: 12px;
+    color: #94a3b8;
+    padding: 4px 8px;
+}
+.gm-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+.gm-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+.status-submitted { background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid #eab308; }
+.status-submitted .gm-status-dot { background: #eab308; box-shadow: 0 0 8px #eab308; }
+.status-in_review { background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid #f97316; }
+.status-in_review .gm-status-dot { background: #f97316; box-shadow: 0 0 8px #f97316; }
+.status-closed { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; }
+.status-closed .gm-status-dot { background: #10b981; box-shadow: 0 0 8px #10b981; }
+.status-rejected { background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid #64748b; }
+.status-rejected .gm-status-dot { background: #64748b; }
+
+.gm-case-subject { font-size: 22px; font-weight: 800; margin: 12px 0 8px; }
+.gm-case-description { font-size: 14px; line-height: 1.6; color: #94a3b8; margin-bottom: 24px; white-space: pre-wrap; }
+html.light-mode .gm-case-description { color: #64748b; }
+
+/* Status Stepper */
+.gm-status-stepper {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 28px 0;
+    padding: 0 16px;
+}
+.gm-stepper-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    z-index: 2;
+}
+.gm-stepper-circle {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    color: #94a3b8;
+}
+.gm-stepper-step.active .gm-stepper-circle {
+    background: #10b981;
+    border-color: #10b981;
+    color: #ffffff;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.4);
+}
+.gm-stepper-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #94a3b8;
+}
+.gm-stepper-step.active .gm-stepper-label { color: #ffffff; }
+html.light-mode .gm-stepper-step.active .gm-stepper-label { color: #000000; }
+.gm-stepper-line {
+    flex: 1;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.14);
+    margin: 0 10px;
+    transform: translateY(-11px);
+}
+.gm-stepper-line.active { background: #10b981; }
+
+.gm-resolution-banner {
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin-bottom: 20px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Evidence Grid */
+.gm-case-evidence-section { margin-top: 20px; }
+.gm-evidence-title { font-size: 13px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 10px; }
+.gm-evidence-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+}
+.gm-evidence-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+}
+.gm-evidence-name { font-weight: 700; margin-bottom: 4px; word-break: break-all; }
+.gm-evidence-meta { color: #94a3b8; font-size: 11px; font-family: monospace; }
+
+/* Chat Card */
+.gm-chat-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    overflow: hidden;
+}
+html.light-mode .gm-chat-card {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+}
+.gm-chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+html.light-mode .gm-chat-header {
+    background: #f8fafc;
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+.gm-chat-header-left { display: flex; align-items: center; gap: 8px; }
+.gm-chat-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+    animation: gmPulse 2s infinite;
+}
+@keyframes gmPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
+.gm-chat-title { font-size: 14px; font-weight: 800; margin: 0; }
+.gm-chat-sync-text { font-size: 11px; color: #94a3b8; font-family: monospace; }
+
+.gm-chat-messages {
+    padding: 20px;
+    min-height: 240px;
+    max-height: 480px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.gm-chat-empty {
+    text-align: center;
+    color: #64748b;
+    font-size: 13px;
+    margin: auto;
+}
+.gm-chat-bubble {
+    max-width: 78%;
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+.bubble-admin {
+    align-self: flex-start;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-bottom-left-radius: 4px;
+}
+html.light-mode .bubble-admin {
+    background: #f1f5f9;
+    border-color: rgba(0, 0, 0, 0.1);
+}
+.bubble-reporter {
+    align-self: flex-end;
+    background: #10b981;
+    color: #ffffff;
+    border-bottom-right-radius: 4px;
+}
+.bubble-meta {
+    display: block;
+    font-size: 10px;
+    opacity: 0.7;
+    margin-top: 4px;
+}
+.bubble-sender {
+    display: block;
+    font-size: 11px;
+    font-weight: 800;
+    margin-bottom: 2px;
+    color: #38bdf8;
+}
+.bubble-reporter .bubble-sender { color: rgba(255, 255, 255, 0.85); }
+
+.gm-chat-composer {
+    display: flex;
+    gap: 8px;
+    padding: 14px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.2);
+}
+html.light-mode .gm-chat-composer {
+    border-top-color: rgba(0, 0, 0, 0.08);
+    background: #ffffff;
+}
+.gm-chat-input {
+    flex: 1;
+    padding: 10px 16px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+    color: inherit;
+}
+html.light-mode .gm-chat-input {
+    border-color: rgba(0, 0, 0, 0.15);
+    background: #f8fafc;
+}
+.gm-chat-send-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    background: #10b981;
+    color: #ffffff;
+    border: none;
+    transition: all 0.2s ease;
+}
+.gm-chat-send-btn:hover { background: #059669; }
+</style>
+
+<!-- Support Portal Controller Script -->
+<script>
+(function() {
+    'use strict';
+
+    // Auto-detect API base (direct 8080 during local testing or reverse proxy /api/support in production)
+    const API_BASE = (window.location.port === '2368' || window.location.port === '3000') 
+        ? 'http://127.0.0.1:8080/api/support' 
+        : '/api/support';
+
+    let selectedFiles = [];
+    let currentCaseCode = null;
+    let currentAccessKey = null;
+    let pollTimer = null;
+
+    // Tab Switching
+    window.switchSupportTab = function(tab) {
+        const btnSubmit = document.getElementById('tabBtnSubmit');
+        const btnTrack = document.getElementById('tabBtnTrack');
+        const pSubmit = document.getElementById('panelSubmit');
+        const pTrack = document.getElementById('panelTrack');
+
+        if (tab === 'submit') {
+            btnSubmit.classList.add('active');
+            btnTrack.classList.remove('active');
+            pSubmit.classList.add('active');
+            pTrack.classList.remove('active');
+        } else {
+            btnTrack.classList.add('active');
+            btnSubmit.classList.remove('active');
+            pTrack.classList.add('active');
+            pSubmit.classList.remove('active');
+            // Try auto-loading saved case
+            checkSavedCase();
+        }
+    };
+
+    window.toggleAnonFields = function(isAnon) {
+        const fields = document.getElementById('anonFields');
+        if (fields) fields.style.display = isAnon ? 'none' : 'block';
+    };
+
+    // File Selection & Drag-and-drop
+    window.handleFileSelect = function(e) {
+        const files = Array.from(e.target.files || []);
+        addFiles(files);
+    };
+
+    const dropzone = document.getElementById('gmDropzone');
+    if (dropzone) {
+        ['dragenter', 'dragover'].forEach(name => {
+            dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.style.borderColor = '#10b981'; });
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.style.borderColor = ''; });
+        });
+        dropzone.addEventListener('drop', (e) => {
+            const files = Array.from(e.dataTransfer.files || []);
+            addFiles(files);
+        });
+    }
+
+    function addFiles(files) {
+        selectedFiles = selectedFiles.concat(files);
+        renderFileList();
+    }
+
+    function renderFileList() {
+        const list = document.getElementById('gmFileList');
+        if (!list) return;
+        if (selectedFiles.length === 0) {
+            list.style.display = 'none';
+            list.innerHTML = '';
+            return;
+        }
+        list.style.display = 'flex';
+        list.innerHTML = selectedFiles.map((f, i) => `
+            <div class="gm-file-item">
+                <span>📁 <strong>${escapeHtml(f.name)}</strong> (${(f.size / 1024).toFixed(1)} KB)</span>
+                <button type="button" class="gm-file-remove" onclick="removeFile(${i})">✕</button>
+            </div>
+        `).join('');
+    }
+
+    window.removeFile = function(index) {
+        selectedFiles.splice(index, 1);
+        renderFileList();
+    };
+
+    // Case Submission
+    window.handleCaseSubmit = async function(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btnSubmitCase');
+        btn.disabled = true;
+        btn.querySelector('.gm-btn-text').textContent = 'Encrypting & Dispatching...';
+
+        try {
+            const formData = new FormData();
+            formData.append('category', document.getElementById('caseCategory').value);
+            const prio = document.querySelector('input[name="priority"]:checked');
+            formData.append('priority', prio ? prio.value : 'STANDARD');
+            formData.append('subject', document.getElementById('caseSubject').value);
+            formData.append('description', document.getElementById('caseDescription').value);
+
+            const isAnon = document.getElementById('anonToggle').checked;
+            if (!isAnon) {
+                formData.append('reporter_alias', document.getElementById('reporterAlias').value);
+                formData.append('reporter_contact', document.getElementById('reporterContact').value);
+            } else {
+                formData.append('reporter_alias', 'Anonymous');
+            }
+
+            selectedFiles.forEach(f => {
+                formData.append('evidence', f, f.name);
+            });
+
+            const res = await fetch(`${API_BASE}/cases`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `Server responded with ${res.status}`);
+            }
+
+            const data = await res.json();
+            // Store credentials
+            currentCaseCode = data.case_code;
+            currentAccessKey = data.access_key;
+            localStorage.setItem('gm_active_case_code', currentCaseCode);
+            localStorage.setItem('gm_active_access_key', currentAccessKey);
+
+            // Display success
+            document.getElementById('gmSupportForm').style.display = 'none';
+            document.getElementById('resCaseCode').textContent = currentCaseCode;
+            document.getElementById('resAccessKey').textContent = currentAccessKey;
+            document.getElementById('caseSuccessCard').style.display = 'block';
+
+            // Mark badge
+            const badge = document.getElementById('activeCaseBadge');
+            if (badge) badge.style.display = 'inline-block';
+
+        } catch(err) {
+            alert('Failed to submit report: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.querySelector('.gm-btn-text').textContent = 'Submit Confidential Report';
+        }
+    };
+
+    window.openActiveCaseDashboard = function() {
+        switchSupportTab('track');
+        if (currentCaseCode && currentAccessKey) {
+            loadCase(currentCaseCode, currentAccessKey);
+        }
+    };
+
+    window.loadCaseFromInputs = function() {
+        const code = document.getElementById('lookupCaseCode').value.trim();
+        const key = document.getElementById('lookupAccessKey').value.trim();
+        if (!code || !key) {
+            alert('Please enter both your Case Reference Code and Private Access Key.');
+            return;
+        }
+        loadCase(code, key);
+    };
+
+    async function loadCase(code, key) {
+        try {
+            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(code)}?key=${encodeURIComponent(key)}`);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to load case');
+            }
+            const data = await res.json();
+            currentCaseCode = code;
+            currentAccessKey = key;
+            localStorage.setItem('gm_active_case_code', code);
+            localStorage.setItem('gm_active_access_key', key);
+
+            renderCaseDashboard(data);
+
+            // Start polling for real-time live chat & status transitions
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(() => pollCaseUpdates(), 3800);
+
+        } catch(err) {
+            alert('Case Access Error: ' + err.message);
+        }
+    }
+
+    function renderCaseDashboard(data) {
+        document.getElementById('gmLookupCard').style.display = 'none';
+        document.getElementById('gmCaseDashboard').style.display = 'block';
+
+        document.getElementById('dashCaseCode').textContent = data.case_code;
+        document.getElementById('dashSubject').textContent = data.subject;
+        document.getElementById('dashDescription').textContent = data.description;
+        document.getElementById('dashCategory').textContent = data.category;
+
+        // Priority
+        const prioEl = document.getElementById('dashPriority');
+        prioEl.textContent = data.priority;
+        prioEl.className = `gm-priority-badge priority-${data.priority}`;
+
+        // Status Pill
+        const pill = document.getElementById('dashStatusPill');
+        const statusKey = (data.status || 'SUBMITTED').toLowerCase();
+        pill.className = `gm-status-pill status-${statusKey}`;
+        document.getElementById('dashStatusText').textContent = data.status;
+
+        // Visual Stepper
+        const sSubmitted = document.getElementById('stepSubmitted');
+        const sReview = document.getElementById('stepReview');
+        const sRes = document.getElementById('stepResolution');
+        const l1 = document.getElementById('line1');
+        const l2 = document.getElementById('line2');
+
+        sSubmitted.classList.add('active');
+        if (data.status === 'IN_REVIEW' || data.status === 'CLOSED' || data.status === 'REJECTED') {
+            sReview.classList.add('active');
+            l1.classList.add('active');
+        } else {
+            sReview.classList.remove('active');
+            l1.classList.remove('active');
+        }
+
+        if (data.status === 'CLOSED' || data.status === 'REJECTED') {
+            sRes.classList.add('active');
+            l2.classList.add('active');
+            const resBanner = document.getElementById('dashResolutionBanner');
+            resBanner.style.display = 'block';
+            document.getElementById('dashResolutionTitle').textContent = (data.status === 'CLOSED') ? 'Case Closed & Resolved:' : 'Case Dismissed / Rejected:';
+            document.getElementById('dashResolutionNote').textContent = data.resolution_note || 'Completed by verified investigation staff.';
+        } else {
+            sRes.classList.remove('active');
+            l2.classList.remove('active');
+            document.getElementById('dashResolutionBanner').style.display = 'none';
+        }
+
+        // Evidence files list
+        const evList = document.getElementById('dashEvidenceList');
+        if (data.files && data.files.length > 0) {
+            document.getElementById('dashEvidenceSection').style.display = 'block';
+            evList.innerHTML = data.files.map(f => `
+                <div class="gm-evidence-card">
+                    <div class="gm-evidence-name">📁 ${escapeHtml(f.name)}</div>
+                    <div class="gm-evidence-meta">Size: ${(f.size / 1024).toFixed(1)} KB | SHA-256: ${f.sha256.substring(0, 16)}...</div>
+                </div>
+            `).join('');
+        } else {
+            document.getElementById('dashEvidenceSection').style.display = 'none';
+        }
+
+        // Messages
+        renderMessages(data.messages || []);
+    }
+
+    function renderMessages(messages) {
+        const container = document.getElementById('gmChatMessages');
+        if (!messages || messages.length === 0) {
+            container.innerHTML = '<div class="gm-chat-empty"><span>Case registered. Awaiting investigator response.</span></div>';
+            return;
+        }
+
+        const isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 40;
+
+        container.innerHTML = messages.map(m => {
+            const isAdmin = m.sender_type === 'admin';
+            const bubbleClass = isAdmin ? 'bubble-admin' : 'bubble-reporter';
+            const senderLabel = isAdmin ? `🛡️ ${escapeHtml(m.sender_name)}` : 'You (Reporter)';
+            const timeStr = m.created_at ? m.created_at.substring(11, 16) : '';
+            return `
+                <div class="gm-chat-bubble ${bubbleClass}">
+                    <span class="bubble-sender">${senderLabel}</span>
+                    <div class="bubble-content">${escapeHtml(m.message_text)}</div>
+                    <span class="bubble-meta">${timeStr}</span>
+                </div>
+            `;
+        }).join('');
+
+        if (isScrolledToBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+    }
+
+    async function pollCaseUpdates() {
+        if (!currentCaseCode || !currentAccessKey) return;
+        try {
+            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}?key=${encodeURIComponent(currentAccessKey)}`);
+            if (res.ok) {
+                const data = await res.json();
+                renderCaseDashboard(data);
+            }
+        } catch(e) {}
+    }
+
+    // Send Message from Web
+    window.handleSendMessage = async function(e) {
+        e.preventDefault();
+        const input = document.getElementById('chatInputText');
+        const btn = document.getElementById('btnSendChat');
+        const text = input.value.trim();
+        if (!text || !currentCaseCode || !currentAccessKey) return;
+
+        btn.disabled = true;
+        try {
+            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}/messages`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: jsonStringifySafe({
+                    key: currentAccessKey,
+                    message: text
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to deliver message');
+            }
+
+            input.value = '';
+            pollCaseUpdates();
+
+        } catch(err) {
+            alert('Failed to send message: ' + err.message);
+        } finally {
+            btn.disabled = false;
+        }
+    };
+
+    window.copyText = function(id) {
+        const text = document.getElementById(id).textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Copied to clipboard: ' + text);
+        }).catch(() => {
+            prompt('Copy text manually:', text);
+        });
+    };
+
+    function checkSavedCase() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const qCase = urlParams.get('case');
+        const qKey = urlParams.get('key');
+        if (qCase && qKey) {
+            document.getElementById('lookupCaseCode').value = qCase;
+            document.getElementById('lookupAccessKey').value = qKey;
+            loadCase(qCase, qKey);
+            return;
+        }
+
+        const savedCode = localStorage.getItem('gm_active_case_code');
+        const savedKey = localStorage.getItem('gm_active_access_key');
+        if (savedCode && savedKey) {
+            document.getElementById('lookupCaseCode').value = savedCode;
+            document.getElementById('lookupAccessKey').value = savedKey;
+            const badge = document.getElementById('activeCaseBadge');
+            if (badge) badge.style.display = 'inline-block';
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function jsonStringifySafe(obj) {
+        return JSON.stringify(obj);
+    }
+
+    // Auto-check URL or saved case on init
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('case') || window.location.hash === '#track') {
+        switchSupportTab('track');
+    } else {
+        const savedCode = localStorage.getItem('gm_active_case_code');
+        if (savedCode) {
+            const badge = document.getElementById('activeCaseBadge');
+            if (badge) badge.style.display = 'inline-block';
+        }
+    }
+})();
+</script>
