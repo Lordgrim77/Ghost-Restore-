@@ -75,6 +75,13 @@ def sync_editable_email_templates_to_core():
             count += 1
     print(f"  ✓ Synchronized {count} email template files from repo into Ghost core.")
 
+    author_model_src = os.path.join(REPO_DIR, "models", "author.js")
+    author_model_dst = os.path.join(GHOST_CORE_SERVER, "models", "author.js")
+    if os.path.exists(author_model_src):
+        os.makedirs(os.path.dirname(author_model_dst), exist_ok=True)
+        shutil.copy2(author_model_src, author_model_dst)
+        print("  ✓ Synchronized models/author.js into Ghost core.")
+
 def package_theme():
     print(f"[*] Packaging Alto theme from {THEME_SRC}...")
     with zipfile.ZipFile(THEME_ZIP_DST, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -149,6 +156,8 @@ def package_emails():
         # Meta & Social
         "frontend/meta/og-image.js",
         "frontend/meta/twitter-image.js",
+        # Core Models (Allow staff/admins with 0 posts on team page)
+        "models/author.js",
     ]
 
     with zipfile.ZipFile(EMAIL_ZIP_DST, 'w', zipfile.ZIP_DEFLATED) as zf:

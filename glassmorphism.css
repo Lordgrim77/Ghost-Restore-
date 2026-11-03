@@ -41116,17 +41116,27 @@ html[data-theme="light"] .gm-team-card:hover {
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.08) !important;
 }
 
+.gm-team-card {
+  align-items: stretch !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
 .gm-team-card-inner {
   display: flex !important;
   flex-direction: column !important;
   gap: 16px !important;
   flex-grow: 1 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .gm-team-header-row {
   display: flex !important;
   align-items: center !important;
   gap: 18px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .gm-team-avatar-wrap {
@@ -41228,6 +41238,8 @@ html[data-theme="light"] .gm-team-avatar-initials {
   line-height: 1.6 !important;
   color: var(--gm-text-secondary) !important;
   margin: 0 !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .gm-team-card-footer {
@@ -41238,6 +41250,8 @@ html[data-theme="light"] .gm-team-avatar-initials {
   padding-top: 18px !important;
   border-top: 1px solid var(--gm-glass-border) !important;
   margin-top: 20px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .gm-team-social-links {
