@@ -87,7 +87,7 @@ UPDATE ghost_production.settings SET value = '__GHOST_URL__/content/images/og-im
 UPDATE ghost_production.settings SET value = '__GHOST_URL__/content/images/og-image.png' WHERE key = 'twitter_image';
 " 2>/dev/null || true
 
-echo "[*] Ensuring /contact/ and /support/ pages exist in Ghost database..."
+echo "[*] Ensuring /contact/, /support/, and /team/ pages exist in Ghost database..."
 sudo mysql -e "
 INSERT IGNORE INTO ghost_production.posts (
     id, uuid, title, slug, lexical, html, plaintext, comment_id, featured, type, status, visibility, email_recipient_filter, created_at, updated_at, published_at, published_by, show_title_and_feature_image
@@ -100,6 +100,29 @@ INSERT IGNORE INTO ghost_production.posts (
 ) SELECT 
     '6ae71fbd6a4691255cb0ca98', UUID(), 'Contact & Support', 'support', lexical, html, plaintext, '6ae71fbd6a4691255cb0ca98', 0, 'page', 'published', 'public', 'all', NOW(), NOW(), NOW(), published_by, 1
 FROM ghost_production.posts WHERE slug = 'about' LIMIT 1;
+
+INSERT IGNORE INTO ghost_production.posts (
+    id, uuid, title, slug, lexical, html, plaintext, comment_id, featured, type, status, visibility, email_recipient_filter, created_at, updated_at, published_at, published_by, show_title_and_feature_image
+) SELECT 
+    '6ae71fbd6a4691255cb0ca77', UUID(), 'Our Team', 'team', lexical, html, plaintext, '6ae71fbd6a4691255cb0ca77', 0, 'page', 'published', 'public', 'all', NOW(), NOW(), NOW(), published_by, 1
+FROM ghost_production.posts WHERE slug = 'about' LIMIT 1;
+" 2>/dev/null || true
+
+echo "[*] Ensuring Our Team is in the navigation menu..."
+sudo python3 -c "
+import json, subprocess
+try:
+    res = subprocess.check_output(['mysql', '-Nse', 'SELECT value FROM ghost_production.settings WHERE \`key\`=\"navigation\"']).decode().strip()
+    if res:
+        nav = json.loads(res)
+        urls = [item.get('url') for item in nav]
+        if '/team/' not in urls and '/team' not in urls:
+            nav.append({'label': 'Our Team', 'url': '/team/'})
+            new_val = json.dumps(nav)
+            subprocess.run(['mysql', '-e', f'UPDATE ghost_production.settings SET value={json.dumps(new_val)} WHERE \`key\`=\"navigation\"'])
+            print('  ✓ Added Our Team to navigation menu')
+except Exception as e:
+    pass
 " 2>/dev/null || true
 
 UPDATE_EMAIL_DB_URL="https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main/update_email_db.py?v=$(date +%s)"

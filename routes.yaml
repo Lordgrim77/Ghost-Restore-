@@ -7,6 +7,8 @@ routes:
     template: page-contact
   /support/:
     template: page-support
+  /team/:
+    template: page-team
 
 collections:
   /:
@@ -16,4 +18,3 @@ collections:
 taxonomies:
   tag: /tag/{slug}/
   author: /author/{slug}/
-
