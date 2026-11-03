@@ -3019,15 +3019,17 @@
           return length(max(abs(p)-b+r,0.0))-r;
         }
 
-        vec2 cornerNormal( vec2 p, vec2 b, float r, vec2 fallback ) {
+        vec2 boxNormal(vec2 p, vec2 b, float r) {
           vec2 q = abs(p) - b + r;
-          vec2 m = max(q, 0.0);
-          float l = length(m);
-          if (l <= 0.0) return fallback;
-          float w = smoothstep(0.0, max(r * 0.5, 1.0), min(m.x, m.y));
-          if (w <= 0.0) return fallback;
+          if (q.x > 0.0 && q.y > 0.0) {
+            float l = length(q);
+            if (l > 0.0001) {
+              vec2 s = vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
+              return (q / l) * s;
+            }
+          }
           vec2 s = vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
-          return normalize(mix(fallback, s * (m / l), w));
+          return (q.x > q.y) ? vec2(s.x, 0.0) : vec2(0.0, s.y);
         }
 
         float random(vec2 st) {
@@ -3071,8 +3073,7 @@
           float edge = edgeFactor(p_px, b_px, u_radius);
           float min_dimension = min(u_resolution.x, u_resolution.y);
           float offsetAmt = (edge * u_refraction + pow(edge, 10.0) * u_bevelDepth);
-          float centreBlend = smoothstep(0.15, 0.45, length(p));
-          vec2 refractDir = cornerNormal(p_px, b_px, u_radius, normalize(p + vec2(0.000001)));
+          vec2 refractDir = boxNormal(p_px, b_px, u_radius);
           if (u_interactionRadius > 0.0) {
             vec2 gradient = vec2(
               udRoundBox(deformPoint(originalPoint + vec2(0.5, 0.0)), b_px, u_radius) - udRoundBox(deformPoint(originalPoint - vec2(0.5, 0.0)), b_px, u_radius),
@@ -3080,7 +3081,7 @@
             );
             if (length(gradient) > 0.0001) refractDir = normalize(mix(refractDir, normalize(gradient), min(length(p_px - originalPoint), 1.0)));
           }
-          vec2 offset = refractDir * offsetAmt * centreBlend;
+          vec2 offset = refractDir * offsetAmt;
 
           float tiltRefractionScale = 0.05;
           vec2 tiltOffset = vec2(tan(radians(u_tiltY)), -tan(radians(u_tiltX))) * tiltRefractionScale;
@@ -3140,7 +3141,7 @@
 
           float diff = clamp(length(refrCol.rgb - baseCol.rgb) * 4.0, 0.0, 1.0);
 
-          float antiHalo = (1.0 - centreBlend) * diff;
+          float antiHalo = diff;
 
           vec4 final    = refrCol;
 
@@ -3800,15 +3801,20 @@ fn udRoundBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   return length(max(abs(p) - b + vec2<f32>(r), vec2<f32>(0.0))) - r;
 }
 
-fn cornerNormal(p: vec2<f32>, b: vec2<f32>, r: f32, fb: vec2<f32>) -> vec2<f32> {
+fn boxNormal(p: vec2<f32>, b: vec2<f32>, r: f32) -> vec2<f32> {
   let q = abs(p) - b + vec2<f32>(r);
-  let m = max(q, vec2<f32>(0.0));
-  let l = length(m);
-  if (l <= 0.0) { return fb; }
-  let w = smoothstep(0.0, max(r * 0.5, 1.0), min(m.x, m.y));
-  if (w <= 0.0) { return fb; }
   let s = vec2<f32>(select(1.0, -1.0, p.x < 0.0), select(1.0, -1.0, p.y < 0.0));
-  return normalize(mix(fb, s * (m / l), w));
+  if (q.x > 0.0 && q.y > 0.0) {
+    let l = length(q);
+    if (l > 0.0001) {
+      return (q / l) * s;
+    }
+  }
+  if (q.x > q.y) {
+    return vec2<f32>(s.x, 0.0);
+  } else {
+    return vec2<f32>(0.0, s.y);
+  }
 }
 
 fn random2(st: vec2<f32>) -> f32 {
@@ -3850,8 +3856,7 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
 
   let edge = edgeFactor(p_px, b_px, u.radius);
   let offsetAmt = edge * u.refraction + pow(edge, 10.0) * u.bevelDepth;
-  let centreBlend = smoothstep(0.15, 0.45, length(p));
-  var refractDir = cornerNormal(p_px, b_px, u.radius, normalize(p + vec2<f32>(0.000001)));
+  var refractDir = boxNormal(p_px, b_px, u.radius);
   if (u.interactionRadius.x > 0.0) {
     let gradient = vec2<f32>(
       udRoundBox(deformPoint(originalPoint + vec2<f32>(0.5, 0.0)), b_px, u.radius) - udRoundBox(deformPoint(originalPoint - vec2<f32>(0.5, 0.0)), b_px, u.radius),
@@ -3859,7 +3864,7 @@ fn fs(in: VSOut) -> @location(0) vec4<f32> {
     );
     if (length(gradient) > 0.0001) { refractDir = normalize(mix(refractDir, normalize(gradient), min(length(p_px - originalPoint), 1.0))); }
   }
-  let offset = refractDir * offsetAmt * centreBlend;
+  let offset = refractDir * offsetAmt;
 
   let tiltRefractionScale = 0.05;
   let deg2rad = 0.017453292519943295;
@@ -7004,10 +7009,33 @@ fn fs() -> @location(0) vec4<f32> {
       const scrollX = -snapRect.left;
       const scrollY = -snapRect.top;
 
-      const dstX = Math.max(0, Math.round(scrollX * scale));
-      const dstY = Math.max(0, Math.round(scrollY * scale));
-      const dstW = Math.min(this.textureWidth - dstX, Math.round(hexCanvas.width * scale));
-      const dstH = Math.min(this.textureHeight - dstY, Math.round(hexCanvas.height * scale));
+      // Viewport bounding box of visible lenses for this renderer
+      const vW = window.innerWidth;
+      const vH = window.innerHeight;
+      let minVx = Infinity, maxVx = -Infinity;
+      let minVy = Infinity, maxVy = -Infinity;
+      for (const lens of this.lenses) {
+        const r = lens.rectPx || lens.element?.getBoundingClientRect();
+        if (r && r.bottom > 0 && r.top < vH && r.right > 0 && r.left < vW) {
+          if (r.left < minVx) minVx = r.left;
+          if (r.right > maxVx) maxVx = r.right;
+          if (r.top < minVy) minVy = r.top;
+          if (r.bottom > maxVy) maxVy = r.bottom;
+        }
+      }
+      if (minVy === Infinity) return; // Skip if no lenses in viewport
+
+      const margin = 16;
+      const clipVx = Math.max(0, Math.floor(minVx - margin));
+      const clipVy = Math.max(0, Math.floor(minVy - margin));
+      const clipVw = Math.min(vW - clipVx, Math.ceil((maxVx - minVx) + margin * 2));
+      const clipVh = Math.min(vH - clipVy, Math.ceil((maxVy - minVy) + margin * 2));
+      if (clipVw <= 0 || clipVh <= 0) return;
+
+      const dstX = Math.max(0, Math.round((scrollX + clipVx) * scale));
+      const dstY = Math.max(0, Math.round((scrollY + clipVy) * scale));
+      const dstW = Math.min(this.textureWidth - dstX, Math.round(clipVw * scale));
+      const dstH = Math.min(this.textureHeight - dstY, Math.round(clipVh * scale));
       if (dstW <= 0 || dstH <= 0) return;
 
       if (!this._bgTmpCanvas) {
@@ -7025,7 +7053,11 @@ fn fs() -> @location(0) vec4<f32> {
         if (this.staticSnapshotCanvas) {
           this._bgTmpCtx.drawImage(this.staticSnapshotCanvas, dstX, dstY, dstW, dstH, 0, 0, dstW, dstH);
         }
-        this._bgTmpCtx.drawImage(hexCanvas, 0, 0, hexCanvas.width, hexCanvas.height, 0, 0, dstW, dstH);
+        this._bgTmpCtx.drawImage(
+          hexCanvas,
+          clipVx, clipVy, clipVw, clipVh,
+          0, 0, dstW, dstH
+        );
         this.backend.uploadRegion(dstX, dstY, this._bgTmpCanvas);
       } catch (e) {}
     }

@@ -89,7 +89,9 @@
     isInitialized = true;
 
     // Signal to CSS that liquidGL is active so native CSS blur & opaque backgrounds are replaced
-    document.documentElement.classList.add('liquidgl-active');
+    requestAnimationFrame(function() {
+        document.documentElement.classList.add('liquidgl-active');
+      });
 
     var isLight = getCurrentThemeIsLight();
     var tints = getTints(isLight);
@@ -118,7 +120,7 @@
           frost: 0,
           magnify: 1.0,
           aberration: 0.015,
-          specular: true,
+          specular: false,
           shadow: false,
           tint: tints.nav
         });
@@ -144,7 +146,7 @@
           frost: 0,
           magnify: 1.0,
           aberration: 0.015,
-          specular: true,
+          specular: false,
           shadow: false,
           tint: tints.nav
         });

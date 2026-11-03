@@ -111,26 +111,7 @@
 
     <meta name="view-transition" content="same-origin">
 
-    <!-- Anti-Splash Flash (Runs on initial visit and page refresh/reload, bypasses on internal link navigation) -->
-    <script>
-        (function() {
-            try {
-                var isReload = false;
-                var navEntries = window.performance && performance.getEntriesByType && performance.getEntriesByType('navigation');
-                if (navEntries && navEntries.length > 0 && navEntries[0].type === 'reload') {
-                    isReload = true;
-                } else if (window.performance && window.performance.navigation && window.performance.navigation.type === 1) {
-                    isReload = true;
-                }
-
-                if (isReload) {
-                    sessionStorage.removeItem('gm_cyber_splash_shown');
-                } else if (sessionStorage.getItem('gm_cyber_splash_shown') === '1') {
-                    document.write('<style>#gm-cyber-splash{display:none!important;opacity:0!important;visibility:hidden!important;}</style>');
-                }
-            } catch(e) {}
-        })();
-    </script>
+    <!-- Fast Site Preloader (Smooth transition on every page and article load) -->
 
     <!-- 4. Portal Theme Styler in <head> (Synchronously Intercepts Iframes Before First Paint) -->
     <script src="{{asset "built/portal-theme.js"}}?v=portal-contrast-v16"></script>
@@ -169,7 +150,7 @@
             {{/if}}
         </div>
         <div class="gm-splash-meta">
-            <span class="gm-splash-label">Loading {{@site.title}}</span>
+            <span class="gm-splash-label" id="gm-splash-label-text">{{#is "home"}}Loading {{@site.title}}{{else is "post"}}{{#post}}Loading {{title}}{{/post}}{{else is "page"}}{{#page}}Loading {{title}}{{/page}}{{else is "author"}}{{#author}}Loading {{name}}{{/author}}{{else is "tag"}}{{#tag}}Loading {{name}}{{/tag}}{{else}}Loading {{@site.title}}{{/is}}</span>
             <span class="gm-splash-dots"><span class="dot-1">.</span><span class="dot-2">.</span><span class="dot-3">.</span></span>
         </div>
         <div class="gm-splash-progress-track">
