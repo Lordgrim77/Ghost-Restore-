@@ -138,6 +138,10 @@
           resolution: 1.0,
           content: false,
           tilt: false,
+          interaction: "fluid",
+          interactionStrength: 1.5,
+          interactionRadius: 0.45,
+          interactionViscosity: 0.55,
           refraction: 0.075,
           bevelDepth: 0.08,
           bevelWidth: 0.28,
@@ -165,6 +169,10 @@
           resolution: 1.0,
           content: false,
           tilt: false,
+          interaction: "fluid",
+          interactionStrength: 1.5,
+          interactionRadius: 0.45,
+          interactionViscosity: 0.55,
           refraction: 0.075,
           bevelDepth: 0.08,
           bevelWidth: 0.28,
@@ -217,6 +225,10 @@
           zIndex: 2,
           resolution: 1.0,
           content: false,
+          interaction: "fluid",
+          interactionStrength: 1.2,
+          interactionRadius: 0.40,
+          interactionViscosity: 0.60,
           refraction: 0.065,
           bevelDepth: 0.08,
           bevelWidth: 0.26,
@@ -256,35 +268,6 @@
         registerLens('modal', modalLens);
       } catch(e) {
         console.warn("liquidGL Modal Init:", e);
-      }
-    }
-
-    // 7. Initialize Lenis Virtual Smooth Scrolling & Synchronize liquidGL
-    // This locks DOM scroll & WebGL render loop onto the exact same RAF tick, eliminating scroll lag!
-    if (typeof window.Lenis === 'function') {
-      try {
-        var lenis = new window.Lenis({
-          duration: 1.1,
-          easing: function(t) { return Math.min(1, 1.001 - Math.pow(2, -10 * t)); },
-          orientation: 'vertical',
-          gestureOrientation: 'vertical',
-          smoothWheel: true,
-          wheelMultiplier: 1.0,
-          touchMultiplier: 1.5
-        });
-
-        if (typeof window.liquidGL.syncWith === 'function') {
-          window.liquidGL.syncWith({ lenis: lenis });
-        } else {
-          function lenisRaf(time) {
-            lenis.raf(time);
-            requestAnimationFrame(lenisRaf);
-          }
-          requestAnimationFrame(lenisRaf);
-        }
-        window.__lenis__ = lenis;
-      } catch(err) {
-        console.warn("Lenis init error:", err);
       }
     }
 

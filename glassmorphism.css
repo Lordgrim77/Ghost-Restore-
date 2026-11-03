@@ -1582,14 +1582,10 @@ html[data-theme="light"] body::after {
 
 
 
-  position: sticky !important;
-
-
-
-
-
-
-
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
   top: 0 !important;
 
 
@@ -12710,7 +12706,10 @@ iframe[title*="portal-trigger"],
 
 
 
-    position: sticky !important;
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
 
 
 
@@ -41617,3 +41616,8 @@ html.liquidgl-active .gm-team-card::before,
 html.liquidgl-active .gm-newsletter-card::before {
   opacity: 0.4 !important;
 }
+
+.gh-site, .site { padding-top: 72px !important; }
+
+.site, .gh-site { padding-top: 72px !important; }
+@media (max-width: 768px) { .site, .gh-site { padding-top: 58px !important; } }

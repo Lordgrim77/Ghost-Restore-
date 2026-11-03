@@ -6315,6 +6315,9 @@ fn fs() -> @location(0) vec4<f32> {
           meta && (meta._animating || meta.needsRecapture || meta._capturing)
         );
       });
+      if (this.lenses.some((l) => l.options.specular)) {
+        animated = true;
+      }
       const signature = JSON.stringify(state);
       const changed = signature !== this._renderSignature;
       this._renderSignature = signature;
