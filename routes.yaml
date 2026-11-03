@@ -9,7 +9,6 @@ routes:
     template: page-support
   /team/:
     template: page-team
-    data: page.team
 
 collections:
   /:
