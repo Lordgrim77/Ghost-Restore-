@@ -533,7 +533,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # 9. HELP & INFO
+    # 9. CASE ACTIONS (View, Review, Close, Reject, Evidence, Reply)
+    elif data.startswith("case_"):
+        if support_api_server and support_api_server.bridge:
+            await support_api_server.bridge.handle_callback(update, context)
+        else:
+            await query.edit_message_text(
+                "⚠️ *Support Hub Vault is initializing or offline.*",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    # 10. HELP & INFO
     elif data == "menu_help":
         help_text = (
             "ℹ️ *Ghost Telegram Bot Help*\n\n"
@@ -558,11 +569,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming .zip backup files sent by authorized users."""
+    """Handle incoming documents/files sent by authorized users."""
     user = update.effective_user
     if not is_authorized(user.id):
         await send_unauthorized(update)
         return
+
+    # Check if document is sent within an active case reply session or reply to case message
+    if support_api_server and support_api_server.bridge:
+        bridge = support_api_server.bridge
+        user_id = user.id
+        reply_to = update.message.reply_to_message
+        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        if is_case_session:
+            await bridge.handle_admin_message(update, context)
+            return
 
     doc = update.message.document
     if not doc:
@@ -575,6 +596,60 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_menu_keyboard()
         )
         return
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming photos from authorized users, routing to active case chat."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+
+    if support_api_server and support_api_server.bridge:
+        bridge = support_api_server.bridge
+        user_id = user.id
+        reply_to = update.message.reply_to_message
+        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        if is_case_session:
+            await bridge.handle_admin_message(update, context)
+            return
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming text messages from authorized admins, routing active case replies."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+
+    if support_api_server and support_api_server.bridge:
+        bridge = support_api_server.bridge
+        user_id = user.id
+        reply_to = update.message.reply_to_message
+        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        if is_case_session:
+            await bridge.handle_admin_message(update, context)
+            return
+
+    if update.message.text:
+        await update.message.reply_text(
+            "ℹ️ Use the menu buttons below to manage Ghost, or type /start.",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+
+async def cases_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+    if support_api_server and support_api_server.bridge:
+        await support_api_server.bridge.cases_command(update, context)
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_authorized(user.id):
+        return
+    if support_api_server and support_api_server.bridge:
+        await support_api_server.bridge.cancel_command(update, context)
 
     # Check 20 MB Telegram Bot API download limit
     file_size_bytes = doc.file_size or 0
@@ -821,10 +896,14 @@ def main():
 
     # Handlers
     app.add_handler(CommandHandler(["start", "menu"], start_command))
+    app.add_handler(CommandHandler("cases", cases_command))
+    app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("url", url_command))
     app.add_handler(CommandHandler("restore", restore_command))
     app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
     app.run_polling()
 

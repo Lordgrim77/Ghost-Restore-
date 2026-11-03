@@ -184,12 +184,13 @@ if patched:
     os.system("nginx -t >/dev/null 2>&1 && systemctl reload nginx")
 ' 2>/dev/null || true
 
-echo "[*] Restarting Ghost..."
+echo "[*] Restarting Ghost & Support Bot..."
 if systemctl is-active --quiet "$SVC"; then
     sudo systemctl restart "$SVC"
 else
     sudo systemctl restart ghost_* 2>/dev/null || true
 fi
+sudo systemctl restart ghost-telegram-bot 2>/dev/null || true
 
 echo "=========================================================="
 echo "🎉 Theme, Email Templates & Social Thumbnails updated!"

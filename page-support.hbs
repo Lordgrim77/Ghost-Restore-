@@ -211,6 +211,9 @@
                         </div>
 
                         <div class="gm-success-actions">
+                            <button type="button" class="gm-copy-link-btn" id="btnSuccessCopyLink" onclick="copyDirectCaseLink()">
+                                <span>🔗 Copy Direct Case Link</span>
+                            </button>
                             <button type="button" class="gm-view-case-btn" onclick="openActiveCaseDashboard()">
                                 <span>Open Case Dashboard &amp; Live Chat</span> →
                             </button>
@@ -253,15 +256,31 @@
                         <!-- Case Summary Ribbon -->
                         <div class="gm-case-summary-card">
                             <div class="gm-summary-header">
-                                <div>
+                                <div class="gm-summary-tags">
                                     <span class="gm-case-code-badge" id="dashCaseCode">#CASE-0000</span>
                                     <span class="gm-priority-badge" id="dashPriority">STANDARD</span>
+                                    <span class="gm-category-badge" id="dashCategory" style="display:none;"></span>
+                                    <span class="gm-alias-badge" id="dashReporter" style="display:none;"></span>
                                 </div>
-                                <div class="gm-summary-time" id="dashCreatedAt">Submitted: Recently</div>
+                                <div class="gm-summary-actions">
+                                    <button type="button" class="gm-action-btn" id="btnCopyCaseLink" onclick="copyCaseDirectLink()" title="Copy direct link to access this case without logging in">
+                                        <span id="copyCaseLinkIcon">🔗</span> <span id="copyCaseLinkText">Copy Direct Link</span>
+                                    </button>
+                                    <div class="gm-summary-time" id="dashCreatedAt">Submitted: Recently</div>
+                                </div>
                             </div>
 
                             <h3 class="gm-case-subject" id="dashSubject">Case Subject</h3>
                             <p class="gm-case-description" id="dashDescription">Description...</p>
+
+                            <!-- Official Investigator Determination Note (When Closed or Rejected) -->
+                            <div class="gm-resolution-card" id="dashResolutionCard" style="display:none;">
+                                <div class="gm-resolution-header">
+                                    <span class="gm-resolution-icon" id="dashResolutionIcon">✅</span>
+                                    <h4 class="gm-resolution-title" id="dashResolutionTitle">Case Determination</h4>
+                                </div>
+                                <p class="gm-resolution-body" id="dashResolutionNote"></p>
+                            </div>
 
                             <!-- Visual Status Stepper -->
                             <div class="gm-stepper-wrap">
@@ -285,7 +304,10 @@
 
                             <!-- Attached Evidence Files -->
                             <div class="gm-dash-evidence" id="dashEvidenceSection" style="display:none;">
-                                <h4 class="gm-dash-subhead">📁 Attached Evidence Files (Metadata Scrubbed)</h4>
+                                <div class="gm-evidence-header-row">
+                                    <h4 class="gm-dash-subhead">📁 Attached Evidence Files (Metadata Scrubbed &amp; Verifiable)</h4>
+                                    <span class="gm-evidence-count-badge" id="dashEvidenceCount">0 files</span>
+                                </div>
                                 <div class="gm-evidence-list" id="dashEvidenceList"></div>
                             </div>
                         </div>
@@ -306,16 +328,28 @@
                                 </div>
                             </div>
 
-                            <!-- Composer -->
+                            <!-- Composer with Attachment -->
                             <form id="gmChatComposer" class="gm-chat-composer" onsubmit="handleSendMessage(event)">
-                                <input type="text" id="chatMessageInput" class="gm-chat-input" placeholder="Type a message or provide additional evidence context..." required autocomplete="off">
-                                <button type="submit" class="gm-chat-send-btn" id="btnSendChat">
-                                    <span>Send</span>
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                    </svg>
-                                </button>
+                                <div class="gm-chat-attach-preview" id="chatAttachPreview" style="display:none;">
+                                    <span>📎 <span id="chatAttachName">file.png</span></span>
+                                    <button type="button" class="gm-attach-preview-remove" onclick="removeChatAttachment()" title="Remove file">✕</button>
+                                </div>
+                                <div class="gm-composer-input-row">
+                                    <label class="gm-chat-file-btn" title="Attach screenshot or evidence file">
+                                        <input type="file" id="chatFileInput" style="display:none;" onchange="handleChatFileSelect(this)">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                                        </svg>
+                                    </label>
+                                    <input type="text" id="chatMessageInput" class="gm-chat-input" placeholder="Type a message or provide additional context..." autocomplete="off">
+                                    <button type="submit" class="gm-chat-send-btn" id="btnSendChat">
+                                        <span>Send</span>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                        </svg>
+                                    </button>
+                                </div>
                             </form>
                         </div>
 
@@ -1031,6 +1065,13 @@ html.light-mode .gm-case-summary-card {
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+.gm-summary-tags {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 .gm-case-code-badge {
     font-size: 14px;
@@ -1039,7 +1080,6 @@ html.light-mode .gm-case-summary-card {
     border-radius: 6px;
     background: rgba(56, 189, 248, 0.15);
     color: #38bdf8;
-    margin-right: 8px;
 }
 html.light-mode .gm-case-code-badge {
     background: #e0f2fe;
@@ -1057,11 +1097,149 @@ html.light-mode .gm-case-code-badge {
 .gm-priority-badge.STANDARD { background: #fef9c3; color: #ca8a04; }
 .gm-priority-badge.LOW { background: #f1f5f9; color: #64748b; }
 
+.gm-category-badge {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(88, 166, 255, 0.15);
+    color: #58a6ff;
+    text-transform: uppercase;
+}
+html.light-mode .gm-category-badge {
+    background: #e0f2fe;
+    color: #0284c7;
+}
+.gm-alias-badge {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(163, 113, 247, 0.15);
+    color: #d2a8ff;
+}
+html.light-mode .gm-alias-badge {
+    background: #f3e8ff;
+    color: #7e22ce;
+}
+
+.gm-summary-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.gm-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.gm-action-btn:hover {
+    background: #30363d;
+    color: #ffffff;
+    border-color: #8b949e;
+}
+html.light-mode .gm-action-btn {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+html.light-mode .gm-action-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+.gm-copy-link-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 24px;
+    border-radius: 999px;
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #58a6ff;
+    font-weight: 800;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.gm-copy-link-btn:hover {
+    background: #30363d;
+    border-color: #58a6ff;
+    color: #ffffff;
+}
+html.light-mode .gm-copy-link-btn {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #0284c7;
+}
+html.light-mode .gm-copy-link-btn:hover {
+    background: #e2e8f0;
+    color: #0369a1;
+}
+
 .gm-summary-time { font-size: 12px; color: #8b949e; }
 .gm-case-subject { font-size: 18px; font-weight: 800; margin: 0 0 8px; color: #ffffff; }
 html.light-mode .gm-case-subject { color: #090b10; }
 .gm-case-description { font-size: 14px; color: #94a3b8; line-height: 1.5; margin: 0 0 20px; white-space: pre-wrap; }
 html.light-mode .gm-case-description { color: #64748b; }
+
+/* Investigator Resolution Card */
+.gm-resolution-card {
+    margin: 0 0 20px;
+    padding: 16px 20px;
+    border-radius: 12px;
+    border: 1px solid #238636;
+    background: rgba(35, 134, 54, 0.12);
+}
+.gm-resolution-card.rejected {
+    border-color: #da3633;
+    background: rgba(218, 54, 51, 0.12);
+}
+html.light-mode .gm-resolution-card {
+    background: #f0fdf4;
+    border-color: #86efac;
+}
+html.light-mode .gm-resolution-card.rejected {
+    background: #fef2f2;
+    border-color: #fca5a5;
+}
+.gm-resolution-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.gm-resolution-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 800;
+    color: #3fb950;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.gm-resolution-card.rejected .gm-resolution-title {
+    color: #f85149;
+}
+html.light-mode .gm-resolution-title { color: #15803d; }
+html.light-mode .gm-resolution-card.rejected .gm-resolution-title { color: #b91c1c; }
+.gm-resolution-body {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #f0f6fc;
+    white-space: pre-wrap;
+}
+html.light-mode .gm-resolution-body { color: #1e293b; }
 
 /* Status Stepper */
 .gm-stepper-wrap {
@@ -1123,22 +1301,182 @@ html.light-mode .gm-stepper-line { background: #e2e8f0; }
 
 /* Evidence files */
 .gm-dash-evidence { margin-top: 16px; }
-.gm-dash-subhead { font-size: 13px; font-weight: 800; margin: 0 0 10px; color: #8b949e; text-transform: uppercase; }
-.gm-evidence-list { display: flex; flex-direction: column; gap: 8px; }
+.gm-evidence-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.gm-dash-subhead { font-size: 13px; font-weight: 800; margin: 0; color: #8b949e; text-transform: uppercase; }
+.gm-evidence-count-badge {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #21262d;
+    color: #8b949e;
+    border: 1px solid #30363d;
+}
+html.light-mode .gm-evidence-count-badge {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+    color: #64748b;
+}
+.gm-evidence-list { display: flex; flex-direction: column; gap: 10px; }
 .gm-evidence-card {
-    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 16px;
     background: #161b22;
     border: 1px solid #30363d;
-    border-radius: 8px;
-    font-size: 13px;
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+.gm-evidence-card:hover {
+    border-color: #58a6ff;
+    background: #1c2128;
 }
 html.light-mode .gm-evidence-card {
     background: #f8fafc;
     border-color: #e2e8f0;
 }
-.gm-evidence-name { font-weight: 700; color: #58a6ff; margin-bottom: 2px; }
-html.light-mode .gm-evidence-name { color: #0284c7; }
-.gm-evidence-meta { font-size: 11px; color: #8b949e; font-family: monospace; }
+html.light-mode .gm-evidence-card:hover {
+    border-color: #0284c7;
+    background: #f1f5f9;
+}
+.gm-evidence-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+}
+.gm-evidence-thumb {
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    flex-shrink: 0;
+}
+.gm-evidence-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    background: rgba(88, 166, 255, 0.1);
+    color: #58a6ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+}
+html.light-mode .gm-evidence-icon {
+    background: #e0f2fe;
+    color: #0284c7;
+}
+.gm-evidence-info {
+    min-width: 0;
+    flex: 1;
+}
+.gm-evidence-name {
+    font-weight: 700;
+    color: #f0f6fc;
+    margin-bottom: 3px;
+    word-break: break-all;
+    font-size: 13px;
+}
+html.light-mode .gm-evidence-name { color: #0f172a; }
+.gm-evidence-meta {
+    font-size: 11px;
+    color: #8b949e;
+    font-family: monospace;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.gm-mime-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    background: rgba(88, 166, 255, 0.15);
+    color: #58a6ff;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 700;
+}
+html.light-mode .gm-mime-tag {
+    background: #e0f2fe;
+    color: #0284c7;
+}
+.gm-sha-tag {
+    font-size: 10px;
+    font-family: monospace;
+    color: #8b949e;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+html.light-mode .gm-sha-tag {
+    background: #f1f5f9;
+    color: #64748b;
+}
+.gm-evidence-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.gm-evidence-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #c9d1d9;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.gm-evidence-btn:hover {
+    background: #30363d;
+    color: #ffffff;
+    border-color: #8b949e;
+}
+.gm-evidence-btn-primary {
+    background: #238636;
+    border-color: #2ea043;
+    color: #ffffff;
+}
+.gm-evidence-btn-primary:hover {
+    background: #2ea043;
+    color: #ffffff;
+}
+html.light-mode .gm-evidence-btn {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+html.light-mode .gm-evidence-btn:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+html.light-mode .gm-evidence-btn-primary {
+    background: #0284c7;
+    border-color: #0284c7;
+    color: #ffffff;
+}
+html.light-mode .gm-evidence-btn-primary:hover {
+    background: #0369a1;
+    color: #ffffff;
+}
 
 /* Chat Card */
 .gm-chat-card {
@@ -1234,17 +1572,93 @@ html.light-mode .bubble-admin {
     font-weight: 800;
 }
 
+.bubble-attachment {
+    padding: 5px 10px;
+    background: rgba(88, 166, 255, 0.18);
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 6px;
+    color: #58a6ff;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+html.light-mode .bubble-attachment {
+    background: #e0f2fe;
+    color: #0284c7;
+}
+.bubble-text { word-break: break-word; }
+
 /* Chat Composer */
 .gm-chat-composer {
     display: flex;
+    flex-direction: column;
     gap: 8px;
-    padding: 16px 20px;
+    padding: 14px 20px;
     background: #161b22;
     border-top: 1px solid #30363d;
 }
 html.light-mode .gm-chat-composer {
     background: #f8fafc;
     border-top-color: #e2e8f0;
+}
+.gm-chat-attach-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: rgba(88, 166, 255, 0.1);
+    border: 1px dashed #58a6ff;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #58a6ff;
+    font-weight: 600;
+}
+html.light-mode .gm-chat-attach-preview {
+    background: #f0f9ff;
+    border-color: #0284c7;
+    color: #0284c7;
+}
+.gm-attach-preview-remove {
+    background: none;
+    border: none;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 0 4px;
+}
+.gm-attach-preview-remove:hover { color: #f85149; }
+.gm-composer-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.gm-chat-file-btn {
+    cursor: pointer;
+    padding: 10px 12px;
+    border-radius: 999px;
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+.gm-chat-file-btn:hover {
+    background: #30363d;
+    color: #58a6ff;
+    border-color: #58a6ff;
+}
+html.light-mode .gm-chat-file-btn {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #64748b;
+}
+html.light-mode .gm-chat-file-btn:hover {
+    background: #e2e8f0;
+    color: #0284c7;
 }
 .gm-chat-input {
     flex: 1;
@@ -1618,9 +2032,38 @@ html.light-mode .gm-chat-input {
         pBadge.textContent = data.priority;
         pBadge.className = `gm-priority-badge ${data.priority}`;
 
+        // Category and Reporter tags
+        const catBadge = document.getElementById('dashCategory');
+        if (data.category) {
+            catBadge.textContent = data.category;
+            catBadge.style.display = 'inline-block';
+        } else {
+            catBadge.style.display = 'none';
+        }
+
+        const repBadge = document.getElementById('dashReporter');
+        if (data.reporter_alias) {
+            repBadge.textContent = 'Reporter: ' + data.reporter_alias;
+            repBadge.style.display = 'inline-block';
+        } else {
+            repBadge.style.display = 'none';
+        }
+
         document.getElementById('dashCreatedAt').textContent = 'Submitted: ' + (data.created_at || '').substring(0, 10);
         document.getElementById('dashSubject').textContent = data.subject;
         document.getElementById('dashDescription').textContent = data.description;
+
+        // Determination / Resolution Card
+        const resCard = document.getElementById('dashResolutionCard');
+        if (data.resolution_note && (data.status === 'CLOSED' || data.status === 'REJECTED')) {
+            resCard.style.display = 'block';
+            resCard.className = data.status === 'REJECTED' ? 'gm-resolution-card rejected' : 'gm-resolution-card';
+            document.getElementById('dashResolutionIcon').textContent = data.status === 'REJECTED' ? '❌' : '✅';
+            document.getElementById('dashResolutionTitle').textContent = data.status === 'REJECTED' ? 'Official Case Determination: Rejected / Dismissed' : 'Official Case Determination: Resolved & Closed';
+            document.getElementById('dashResolutionNote').textContent = data.resolution_note;
+        } else {
+            resCard.style.display = 'none';
+        }
 
         // Stepper
         const sSubmitted = document.getElementById('stepSubmitted');
@@ -1653,17 +2096,57 @@ html.light-mode .gm-chat-input {
         }
 
         // Evidence files list
+        const evSection = document.getElementById('dashEvidenceSection');
         const evList = document.getElementById('dashEvidenceList');
+        const evCount = document.getElementById('dashEvidenceCount');
+
         if (data.files && data.files.length > 0) {
-            document.getElementById('dashEvidenceSection').style.display = 'block';
-            evList.innerHTML = data.files.map(f => `
-                <div class="gm-evidence-card">
-                    <div class="gm-evidence-name">📁 ${escapeHtml(f.original_name || f.name)}</div>
-                    <div class="gm-evidence-meta">Size: ${(f.file_size / 1024).toFixed(1)} KB | SHA-256: ${(f.sha256_hash || '').substring(0, 16)}...</div>
-                </div>
-            `).join('');
+            evSection.style.display = 'block';
+            if (evCount) evCount.textContent = `${data.files.length} file(s)`;
+            evList.innerHTML = data.files.map(f => {
+                const fname = escapeHtml(f.original_name || f.name || 'evidence.bin');
+                const rawSize = f.file_size !== undefined ? f.file_size : (f.size || 0);
+                const sizeStr = (rawSize / 1024).toFixed(1) + ' KB';
+                const fsha = (f.sha256_hash || f.sha256 || '');
+                const mime = (f.mime || f.mime_type || '').toLowerCase();
+                const isImage = mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/i.test(fname);
+                const isPdf = mime === 'application/pdf' || fname.toLowerCase().endsWith('.pdf');
+                const fileUrl = `${API_BASE}/cases/${encodeURIComponent(data.case_code)}/evidence/${encodeURIComponent(f.id)}?key=${encodeURIComponent(currentAccessKey)}`;
+
+                let thumbHtml = '';
+                if (isImage) {
+                    thumbHtml = `<a href="${fileUrl}" target="_blank" rel="noopener" class="gm-evidence-thumb-link"><img src="${fileUrl}" alt="${fname}" class="gm-evidence-thumb" loading="lazy" /></a>`;
+                } else {
+                    const iconEmoji = isPdf ? '📄' : '📁';
+                    thumbHtml = `<div class="gm-evidence-icon">${iconEmoji}</div>`;
+                }
+
+                return `
+                    <div class="gm-evidence-card">
+                        <div class="gm-evidence-left">
+                            ${thumbHtml}
+                            <div class="gm-evidence-info">
+                                <div class="gm-evidence-name">${fname}</div>
+                                <div class="gm-evidence-meta">
+                                    <span>${sizeStr}</span>
+                                    ${mime ? `<span class="gm-mime-tag">${escapeHtml(mime.split('/')[1] || mime)}</span>` : ''}
+                                    ${fsha ? `<span class="gm-sha-tag" title="SHA-256: ${fsha}">SHA: ${fsha.substring(0, 10)}…</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="gm-evidence-actions">
+                            <a href="${fileUrl}" target="_blank" rel="noopener" class="gm-evidence-btn" title="View or preview this file in a new tab">
+                                👁️ View
+                            </a>
+                            <a href="${fileUrl}" download="${fname}" class="gm-evidence-btn gm-evidence-btn-primary" title="Download clean evidence file to your device">
+                                ⬇️ Download
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
         } else {
-            document.getElementById('dashEvidenceSection').style.display = 'none';
+            evSection.style.display = 'none';
         }
 
         // Messages
@@ -1681,6 +2164,18 @@ html.light-mode .gm-chat-input {
             const isReporter = m.sender_type === 'reporter';
             const badge = isReporter ? '' : '<span class="bubble-badge">Investigator</span>';
             const time = (m.created_at || '').substring(11, 16);
+            let rawText = m.message_text || '';
+            let fileBadgeHtml = '';
+
+            if (rawText.startsWith('📁 [')) {
+                const closeIdx = rawText.indexOf(']');
+                if (closeIdx !== -1) {
+                    const attachedName = rawText.substring(4, closeIdx);
+                    rawText = rawText.substring(closeIdx + 1).trim();
+                    fileBadgeHtml = `<div class="bubble-attachment">📎 <strong>${escapeHtml(attachedName)}</strong></div>`;
+                }
+            }
+
             return `
                 <div class="gm-chat-bubble ${isReporter ? 'bubble-reporter' : 'bubble-admin'}">
                     <div class="bubble-meta">
@@ -1688,7 +2183,8 @@ html.light-mode .gm-chat-input {
                         ${badge}
                         <span>${time} UTC</span>
                     </div>
-                    <div>${escapeHtml(m.message_text)}</div>
+                    ${fileBadgeHtml}
+                    ${rawText ? `<div class="bubble-text">${escapeHtml(rawText)}</div>` : ''}
                 </div>
             `;
         }).join('');
@@ -1707,23 +2203,55 @@ html.light-mode .gm-chat-input {
         } catch(e) {}
     }
 
+    // Chat Attachment State
+    let selectedChatFile = null;
+
+    window.handleChatFileSelect = function(input) {
+        if (input.files && input.files[0]) {
+            selectedChatFile = input.files[0];
+            const sizeStr = (selectedChatFile.size / 1024).toFixed(1) + ' KB';
+            document.getElementById('chatAttachName').textContent = `${selectedChatFile.name} (${sizeStr})`;
+            document.getElementById('chatAttachPreview').style.display = 'flex';
+        }
+    };
+
+    window.removeChatAttachment = function() {
+        selectedChatFile = null;
+        const input = document.getElementById('chatFileInput');
+        if (input) input.value = '';
+        document.getElementById('chatAttachPreview').style.display = 'none';
+    };
+
     window.handleSendMessage = async function(e) {
         e.preventDefault();
         const input = document.getElementById('chatMessageInput');
         const text = input.value.trim();
-        if (!text || !currentCaseCode || !currentAccessKey) return;
+        if ((!text && !selectedChatFile) || !currentCaseCode || !currentAccessKey) return;
 
         const btn = document.getElementById('btnSendChat');
         btn.disabled = true;
         try {
-            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}/messages`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: jsonStringifySafe({
-                    key: currentAccessKey,
-                    message: text
-                })
-            });
+            let res;
+            if (selectedChatFile) {
+                const formData = new FormData();
+                formData.append('key', currentAccessKey);
+                if (text) formData.append('message', text);
+                formData.append('attachment', selectedChatFile);
+
+                res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}/messages`, {
+                    method: 'POST',
+                    body: formData
+                });
+            } else {
+                res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: jsonStringifySafe({
+                        key: currentAccessKey,
+                        message: text
+                    })
+                });
+            }
 
             if (!res.ok) {
                 let errText = `HTTP ${res.status}`;
@@ -1738,6 +2266,7 @@ html.light-mode .gm-chat-input {
             }
 
             input.value = '';
+            removeChatAttachment();
             pollCaseUpdates();
         } catch(err) {
             let msg = err.message;
@@ -1748,6 +2277,34 @@ html.light-mode .gm-chat-input {
         } finally {
             btn.disabled = false;
         }
+    };
+
+    window.copyCaseDirectLink = function() {
+        if (!currentCaseCode || !currentAccessKey) return;
+        const url = `${window.location.origin}/support/?case=${encodeURIComponent(currentCaseCode)}&key=${encodeURIComponent(currentAccessKey)}`;
+        navigator.clipboard.writeText(url).then(() => {
+            const txt = document.getElementById('copyCaseLinkText');
+            if (txt) txt.textContent = '✓ Link Copied!';
+            setTimeout(() => {
+                if (txt) txt.textContent = 'Copy Direct Link';
+            }, 2500);
+        }).catch(() => {
+            prompt('Copy direct access link:', url);
+        });
+    };
+
+    window.copyDirectCaseLink = function() {
+        if (!currentCaseCode || !currentAccessKey) return;
+        const url = `${window.location.origin}/support/?case=${encodeURIComponent(currentCaseCode)}&key=${encodeURIComponent(currentAccessKey)}`;
+        navigator.clipboard.writeText(url).then(() => {
+            const btn = document.getElementById('btnSuccessCopyLink');
+            if (btn) btn.innerHTML = '<span>✓ Direct Link Copied!</span>';
+            setTimeout(() => {
+                if (btn) btn.innerHTML = '<span>🔗 Copy Direct Case Link</span>';
+            }, 2500);
+        }).catch(() => {
+            prompt('Copy direct access link:', url);
+        });
     };
 
     function checkSavedCase() {

@@ -24,6 +24,7 @@ import struct
 import asyncio
 import logging
 import urllib.parse
+import time
 from typing import Optional, Dict, Any, List
 from email import policy
 from email.parser import BytesParser
@@ -239,6 +240,10 @@ class SupportVault:
 
         with open(stored_path, "wb") as f:
             f.write(clean_data)
+        try:
+            os.chmod(stored_path, 0o664)
+        except Exception:
+            pass
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         with self._get_conn() as conn:
@@ -263,6 +268,18 @@ class SupportVault:
             "file_size": len(clean_data),
             "sha256": sha256
         }
+
+    def get_evidence_path(self, stored_filename: str) -> Optional[str]:
+        candidates = [
+            os.path.join(self.evidence_dir, stored_filename),
+            os.path.join("/var/www/ghost/support_vault/evidence", stored_filename),
+            os.path.join("/opt/ghost-telegram-bot/support_vault/evidence", stored_filename),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "support_vault", "evidence", stored_filename)
+        ]
+        for c in candidates:
+            if os.path.exists(c) and os.path.isfile(c):
+                return c
+        return None
 
     def get_case(self, case_code: str) -> Optional[Dict[str, Any]]:
         with self._get_conn() as conn:
@@ -408,6 +425,10 @@ class SupportBotBridge:
         p_display = priority_emojis.get(case_data['priority'].upper(), case_data['priority'])
         s_display = status_emojis.get(case_data['status'].upper(), case_data['status'])
 
+        note_text = ""
+        if case_data.get("resolution_note"):
+            note_text = f"📋 <b>Determination Note:</b>\n<blockquote>{case_data['resolution_note']}</blockquote>\n"
+
         return (
             f"🚨 <b>INCIDENT REPORT: #{case_data['case_code']}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -420,6 +441,7 @@ class SupportBotBridge:
             f"📝 <b>Subject:</b> {case_data['subject']}\n"
             f"📄 <b>Description:</b>\n"
             f"<blockquote>{case_data['description'][:600]}</blockquote>\n"
+            f"{note_text}"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"Status: <b>{s_display}</b>"
         )
@@ -521,8 +543,8 @@ class SupportBotBridge:
                 return
             await query.message.reply_text(f"📥 Sending {len(files)} evidence attachment(s) for #{case_code}...")
             for f in files:
-                stored_path = os.path.join(self.vault.evidence_dir, f["stored_filename"])
-                if os.path.exists(stored_path):
+                stored_path = self.vault.get_evidence_path(f["stored_filename"])
+                if stored_path and os.path.exists(stored_path):
                     with open(stored_path, "rb") as fp:
                         caption = (
                             f"📁 <b>{f['original_name']}</b>\n"
@@ -543,7 +565,7 @@ class SupportBotBridge:
             )
 
     async def handle_admin_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.message.text:
+        if not update.message:
             return
 
         user_id = update.effective_user.id
@@ -552,7 +574,7 @@ class SupportBotBridge:
 
         # Check 1: Is user in an active reply session?
         if user_id in self.active_reply_sessions:
-            case_code = self.active_reply_sessions.pop(user_id)
+            case_code = self.active_reply_sessions.get(user_id)
 
         # Check 2: Did user reply directly to a bot message representing a case?
         elif reply_to and reply_to.message_id in self.msg_to_case:
@@ -561,22 +583,58 @@ class SupportBotBridge:
         if not case_code:
             return  # Not a support reply message, pass through to other bot handlers
 
-        text = update.message.text.strip()
-        if text == "/cancel":
-            await update.message.reply_text("❌ Reply canceled.")
+        # Handle cancel command
+        if update.message.text and update.message.text.strip().lower() == "/cancel":
+            self.active_reply_sessions.pop(user_id, None)
+            await update.message.reply_text("❌ Reply session ended.", parse_mode=ParseMode.HTML)
             return
 
         admin_name = update.effective_user.first_name or "Investigator"
+        delivered_parts = []
+
+        # Download and store photo if present
+        if update.message.photo:
+            try:
+                photo = update.message.photo[-1]
+                p_file = await photo.get_file()
+                p_bytes = await p_file.download_as_bytearray()
+                p_name = f"admin_photo_{int(time.time())}.jpg"
+                self.vault.save_evidence(case_code, p_name, bytes(p_bytes), "image/jpeg")
+                delivered_parts.append(f"📁 [{p_name}]")
+            except Exception as e:
+                logger.error("Failed to download admin photo: %s", e)
+
+        # Download and store document if present
+        if update.message.document:
+            try:
+                doc = update.message.document
+                d_file = await doc.get_file()
+                d_bytes = await d_file.download_as_bytearray()
+                d_name = doc.file_name or f"admin_file_{int(time.time())}"
+                self.vault.save_evidence(case_code, d_name, bytes(d_bytes), doc.mime_type or "application/octet-stream")
+                delivered_parts.append(f"📁 [{d_name}]")
+            except Exception as e:
+                logger.error("Failed to download admin document: %s", e)
+
+        msg_body = (update.message.text or update.message.caption or "").strip()
+        if msg_body:
+            delivered_parts.append(msg_body)
+
+        final_text = "\n".join(delivered_parts).strip()
+        if not final_text:
+            return
+
         self.vault.add_message(
             case_code=case_code,
             sender_type="admin",
             sender_name=f"Investigator {admin_name}",
-            text=text
+            text=final_text
         )
 
         await update.message.reply_text(
             f"✓ <b>Message delivered to reporter for #{case_code}</b>\n"
-            f"<blockquote>{text}</blockquote>",
+            f"<blockquote>{final_text}</blockquote>\n"
+            f"<i>(Active reply mode. Type more to reply, or send /cancel to end.)</i>",
             parse_mode=ParseMode.HTML
         )
 
@@ -808,6 +866,74 @@ class SupportApiServer:
                 return
 
             # -------------------------------------------------------------
+            # GET /cases/<case_code>/evidence/<file_id> (Stream Evidence File)
+            # -------------------------------------------------------------
+            elif method == "GET" and "/evidence/" in route_path and route_path.startswith("/cases/"):
+                parts = [p for p in route_path.split("/") if p]
+                if len(parts) < 4:
+                    await self._send_response(writer, 400, {"error": "Invalid evidence endpoint format."})
+                    return
+                case_code = parts[1]
+                file_id_str = parts[3]
+                access_key = query.get("key", "").strip()
+
+                case_data = self.vault.get_case(case_code)
+                if not case_data:
+                    await self._send_response(writer, 404, {"error": "Case not found."})
+                    return
+
+                if not access_key or case_data["access_key"] != access_key:
+                    await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
+                    return
+
+                # Locate file
+                target_file = None
+                for f in case_data.get("files", []):
+                    if str(f["id"]) == file_id_str or f["stored_filename"] == file_id_str:
+                        target_file = f
+                        break
+
+                if not target_file:
+                    await self._send_response(writer, 404, {"error": "Evidence attachment not found on case."})
+                    return
+
+                stored_path = self.vault.get_evidence_path(target_file["stored_filename"])
+                if not stored_path or not os.path.exists(stored_path):
+                    await self._send_response(writer, 404, {"error": "Evidence file is missing on server storage."})
+                    return
+
+                try:
+                    with open(stored_path, "rb") as fp:
+                        file_bytes = fp.read()
+                except Exception as e:
+                    logger.error("Failed to read evidence file: %s", e)
+                    await self._send_response(writer, 500, {"error": "Failed to read evidence file from storage."})
+                    return
+
+                mime = target_file.get("mime_type") or "application/octet-stream"
+                orig_name = target_file.get("original_name") or "evidence.bin"
+                encoded_name = urllib.parse.quote(orig_name)
+
+                # Set inline for previewable media, attachment for binaries
+                disp = "inline" if any(mime.startswith(t) for t in ("image/", "text/", "video/")) or mime == "application/pdf" else "attachment"
+
+                header_lines = [
+                    "HTTP/1.1 200 OK",
+                    f"Content-Type: {mime}",
+                    f"Content-Disposition: {disp}; filename=\"{orig_name}\"; filename*=UTF-8''{encoded_name}",
+                    f"Content-Length: {len(file_bytes)}",
+                    "Access-Control-Allow-Origin: *",
+                    "Access-Control-Allow-Methods: GET, OPTIONS",
+                    "Cache-Control: private, max-age=86400",
+                    "Connection: close",
+                    "",
+                    ""
+                ]
+                writer.write("\r\n".join(header_lines).encode('utf-8') + file_bytes)
+                await writer.drain()
+                return
+
+            # -------------------------------------------------------------
             # GET /cases/<case_code> (Fetch Case Status & Chat)
             # -------------------------------------------------------------
             elif method == "GET" and route_path.startswith("/cases/") and not route_path.endswith("/messages"):
@@ -835,6 +961,7 @@ class SupportApiServer:
                         "name": f["original_name"],
                         "size": f["file_size"],
                         "sha256": f["sha256_hash"],
+                        "mime": f.get("mime_type", "application/octet-stream"),
                         "created_at": f["created_at"]
                     })
 
@@ -845,6 +972,7 @@ class SupportApiServer:
                     "status": case_data["status"],
                     "subject": case_data["subject"],
                     "description": case_data["description"],
+                    "reporter_alias": case_data.get("reporter_alias") or "Anonymous",
                     "created_at": case_data["created_at"],
                     "updated_at": case_data["updated_at"],
                     "resolution_note": case_data.get("resolution_note"),
@@ -870,6 +998,7 @@ class SupportApiServer:
                 ctype = headers.get('content-type', '')
                 text = ""
                 key = ""
+                attached_file = None
                 if "application/json" in ctype:
                     try:
                         p = json.loads(body.decode('utf-8'))
@@ -884,8 +1013,11 @@ class SupportApiServer:
                         msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
                         for part in msg.iter_parts():
                             name = part.get_param('name', header='content-disposition')
+                            filename = part.get_filename()
                             payload = part.get_payload(decode=True)
-                            if name == "message" and payload:
+                            if filename and payload:
+                                attached_file = {"filename": filename, "data": payload, "mime": part.get_content_type()}
+                            elif name == "message" and payload:
                                 text = payload.decode('utf-8', errors='replace').strip()
                             elif name == "key" and payload:
                                 key = payload.decode('utf-8', errors='replace').strip()
@@ -903,9 +1035,13 @@ class SupportApiServer:
                     await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
                     return
 
-                if not text:
-                    await self._send_response(writer, 400, {"error": "Message text is required."})
+                if not text and not attached_file:
+                    await self._send_response(writer, 400, {"error": "Message text or attachment is required."})
                     return
+
+                if attached_file:
+                    self.vault.save_evidence(case_code, attached_file["filename"], attached_file["data"], attached_file.get("mime"))
+                    text = f"📁 [{attached_file['filename']}]\n{text}" if text else f"📁 [{attached_file['filename']}]"
 
                 new_msg = self.vault.add_message(
                     case_code=case_code,

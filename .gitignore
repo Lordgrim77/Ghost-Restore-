@@ -12,6 +12,7 @@ ENV/
 
 # Temporary / backups
 backups/
+support_vault/
 *.zip
 !alto-theme-latest.zip
 !email-templates.zip
