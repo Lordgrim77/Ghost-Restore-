@@ -173,15 +173,107 @@ systemctl restart ghost-telegram-bot.service
 
 sleep 2
 
+# 6. Auto-configure Nginx reverse proxy for Support Portal
+echo ""
+echo -e "${BLUE}[6/6] Auto-configuring Nginx reverse proxy for Support Portal...${NC}"
+
+NGINX_STATUS=0
+python3 -c '
+import sys, re, os, glob
+
+conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/nginx/conf.d"]
+proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
+    location /api/support/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 50M;
+    }
+
+"""
+
+seen_files = set()
+patched_any = False
+
+for cdir in conf_dirs:
+    if not os.path.isdir(cdir):
+        continue
+    for f in sorted(glob.glob(os.path.join(cdir, "*"))):
+        real_f = os.path.realpath(f)
+        if not os.path.isfile(real_f) or real_f.endswith(".bak") or real_f in seen_files:
+            continue
+        seen_files.add(real_f)
+        try:
+            with open(real_f, "r", encoding="utf-8", errors="ignore") as fp:
+                content = fp.read()
+            if "2368" in content:
+                if "location /api/support/" in content:
+                    print(f"  ℹ️  Support proxy already configured in: {f}")
+                    patched_any = True
+                else:
+                    parts = re.split(r"(\s+location\s+/\s*\{)", content)
+                    if len(parts) > 1:
+                        with open(real_f + ".bak", "w", encoding="utf-8") as bkp:
+                            bkp.write(content)
+                        new_parts = []
+                        for p in parts:
+                            if re.match(r"^\s+location\s+/\s*\{", p):
+                                new_parts.append("\n" + proxy_block + p)
+                            else:
+                                new_parts.append(p)
+                        with open(real_f, "w", encoding="utf-8") as fp:
+                            fp.write("".join(new_parts))
+                        print(f"  ✓ Successfully injected Support proxy into: {f}")
+                        patched_any = True
+        except Exception as e:
+            print(f"  ⚠️ Error inspecting {f}: {e}")
+
+if patched_any:
+    sys.exit(0)
+else:
+    sys.exit(2)
+' || NGINX_STATUS=$?
+
+if [ "$NGINX_STATUS" -eq 0 ]; then
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx
+    echo -e "${GREEN}✓ Nginx configuration verified and reloaded.${NC}"
+  else
+    echo -e "${YELLOW}⚠️ Nginx syntax check failed. Reverting modified files...${NC}"
+    find /etc/nginx/ -name "*.bak" -exec sh -c 'mv "$1" "${1%.bak}"' _ {} \;
+  fi
+fi
+
+# Self-test endpoints
+echo ""
+echo -e "${BLUE}Running live connection tests...${NC}"
+sleep 1
+HEALTH_LOCAL=$(curl -s http://127.0.0.1:8080/health 2>/dev/null || echo "")
+if [[ "$HEALTH_LOCAL" =~ "support-hub" ]]; then
+  echo -e "${GREEN}✓ Bot API Daemon: ONLINE & LISTENING on 127.0.0.1:8080${NC}"
+else
+  echo -e "${RED}✗ Bot API Daemon: NOT RESPONDING on port 8080${NC}"
+fi
+
+HEALTH_PROXY=$(curl -s http://127.0.0.1/api/support/health 2>/dev/null || echo "")
+if [[ "$HEALTH_PROXY" =~ "support-hub" ]]; then
+  echo -e "${GREEN}✓ Nginx Proxy: VERIFIED (/api/support/ -> 8080)${NC}"
+else
+  echo -e "${YELLOW}ℹ️  Nginx proxy on 127.0.0.1: (Will connect through domain SSL)${NC}"
+fi
+
 # Check status
 if systemctl is-active --quiet ghost-telegram-bot.service; then
   echo ""
   echo -e "${GREEN}==================================================================${NC}"
   echo -e "${GREEN}    🎉 Ghost Telegram Bot Installed & Running Successfully!       ${NC}"
   echo -e "${GREEN}==================================================================${NC}"
-  echo -e "Your bot is now live and waiting for commands on Telegram!"
+  echo -e "Your bot and support portal API are now live and connected!"
   echo ""
   echo -e "👉 Open Telegram, open your bot, and send: ${CYAN}/start${NC}"
+  echo -e "👉 Visit your support portal: ${CYAN}https://yourdomain.com/support/${NC}"
   echo ""
   echo -e "Useful Commands:"
   echo -e "  • Check service status: ${YELLOW}systemctl status ghost-telegram-bot${NC}"

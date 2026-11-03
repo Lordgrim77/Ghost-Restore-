@@ -772,11 +772,33 @@ async def post_shutdown(application: Application):
 
 
 def main():
-    """Start the Telegram bot application."""
+    """Start the Telegram bot application, or fallback to standalone Support API server."""
     if not BOT_TOKEN or BOT_TOKEN == "your_bot_token_here":
-        print("[ERROR] TELEGRAM_BOT_TOKEN is not configured in .env!")
-        print("Please set your bot token from @BotFather in .env.")
-        sys.exit(1)
+        print("==================================================")
+        print(" [WARNING] TELEGRAM_BOT_TOKEN not configured in .env")
+        print(" Starting Support REST API server in fallback mode")
+        print("==================================================")
+        print(f"Ghost Directory:     {GHOST_DIR}")
+        print(f"Backups Directory:   {BACKUPS_DIR}")
+        print(f"Support REST API:    http://{SUPPORT_HOST}:{SUPPORT_PORT}")
+        print("(Add your bot token to .env to enable Telegram bot polling)")
+        print("--------------------------------------------------")
+
+        server = init_support_hub(
+            application=None,
+            ghost_dir=GHOST_DIR,
+            admin_chat_id=ADMIN_CHAT_ID,
+            port=SUPPORT_PORT,
+            host=SUPPORT_HOST
+        )
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(server.start())
+            loop.run_forever()
+        except KeyboardInterrupt:
+            loop.run_until_complete(server.stop())
+        return
 
     print("==================================================")
     print("   Ghost Backup & Restore Telegram Bot Service    ")

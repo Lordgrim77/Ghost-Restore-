@@ -131,6 +131,59 @@ if sudo curl -sSL -f -H "Cache-Control: no-cache" "$UPDATE_EMAIL_DB_URL" -o /tmp
     sudo rm -f /tmp/update_email_db.py
 fi
 
+echo "[*] Ensuring Nginx reverse proxy is configured for Support Portal (/api/support/)..."
+sudo python3 -c '
+import sys, re, os, glob
+
+conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/nginx/conf.d"]
+proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
+    location /api/support/ {
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 50M;
+    }
+
+"""
+
+seen_files = set()
+patched = False
+
+for cdir in conf_dirs:
+    if not os.path.isdir(cdir):
+        continue
+    for f in sorted(glob.glob(os.path.join(cdir, "*"))):
+        real_f = os.path.realpath(f)
+        if not os.path.isfile(real_f) or real_f.endswith(".bak") or real_f in seen_files:
+            continue
+        seen_files.add(real_f)
+        try:
+            with open(real_f, "r", encoding="utf-8", errors="ignore") as fp:
+                content = fp.read()
+            if "2368" in content and "location /api/support/" not in content:
+                parts = re.split(r"(\s+location\s+/\s*\{)", content)
+                if len(parts) > 1:
+                    with open(real_f + ".bak", "w", encoding="utf-8") as bkp:
+                        bkp.write(content)
+                    new_parts = []
+                    for p in parts:
+                        if re.match(r"^\s+location\s+/\s*\{", p):
+                            new_parts.append("\n" + proxy_block + p)
+                        else:
+                            new_parts.append(p)
+                    with open(real_f, "w", encoding="utf-8") as fp:
+                        fp.write("".join(new_parts))
+                    print(f"  ✓ Patched Nginx: {f}")
+                    patched = True
+        except Exception:
+            pass
+
+if patched:
+    os.system("nginx -t >/dev/null 2>&1 && systemctl reload nginx")
+' 2>/dev/null || true
+
 echo "[*] Restarting Ghost..."
 if systemctl is-active --quiet "$SVC"; then
     sudo systemctl restart "$SVC"
