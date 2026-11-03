@@ -100,6 +100,8 @@
     if (splash) splash.setAttribute('data-liquid-ignore', 'true');
     var sodo = document.getElementById('sodo-search-root');
     if (sodo) sodo.setAttribute('data-liquid-ignore', 'true');
+    var hexBg = document.getElementById('gm-cyber-hex-canvas');
+    if (hexBg) hexBg.setAttribute('data-liquid-ignore', 'true');
 
     // 1. Sticky Navigation Bar: True Refraction Prism Visor
     var navEl = document.querySelector('#gh-head');

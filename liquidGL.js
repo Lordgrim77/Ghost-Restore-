@@ -6164,7 +6164,7 @@ fn fs() -> @location(0) vec4<f32> {
             renderer.canvas.style.visibility = active ? "visible" : "hidden";
           }
           if (!active) continue;
-          if (renderer._needsFrame([])) renderer._renderFrame([]);
+          if (renderer._needsFrame(lower)) renderer._renderFrame(lower);
           lower.push(renderer);
         }
       } finally {
@@ -7017,48 +7017,34 @@ fn fs() -> @location(0) vec4<f32> {
       if (!hexCanvas || hexCanvas.width === 0 || hexCanvas.height === 0) return;
 
       const snapRect = this.snapshotTarget.getBoundingClientRect();
-      const sampleAreas = this._videoSampleAreas;
-      if (!sampleAreas || !sampleAreas.length) return;
+      const scale = this.scaleFactor || 1;
+      const scrollX = -snapRect.left;
+      const scrollY = -snapRect.top;
+
+      const dstX = Math.max(0, Math.round(scrollX * scale));
+      const dstY = Math.max(0, Math.round(scrollY * scale));
+      const dstW = Math.min(this.textureWidth - dstX, Math.round(hexCanvas.width * scale));
+      const dstH = Math.min(this.textureHeight - dstY, Math.round(hexCanvas.height * scale));
+      if (dstW <= 0 || dstH <= 0) return;
 
       if (!this._bgTmpCanvas) {
         this._bgTmpCanvas = document.createElement("canvas");
         this._bgTmpCtx = this._bgTmpCanvas.getContext("2d", { alpha: true });
       }
 
-      const canvasW = hexCanvas.width;
-      const canvasH = hexCanvas.height;
-      const scale = this.scaleFactor || 1;
-
-      for (let i = 0; i < sampleAreas.length; i++) {
-        const area = sampleAreas[i];
-        const sx = Math.max(0, Math.floor(area.left));
-        const sy = Math.max(0, Math.floor(area.top));
-        const sw = Math.min(canvasW - sx, Math.ceil(area.width));
-        const sh = Math.min(canvasH - sy, Math.ceil(area.height));
-        if (sw <= 0 || sh <= 0) continue;
-
-        const dstX = Math.round((area.left - snapRect.left) * scale);
-        const dstY = Math.round((area.top - snapRect.top) * scale);
-        const dstW = Math.round(area.width * scale);
-        const dstH = Math.round(area.height * scale);
-
-        if (dstW <= 0 || dstH <= 0 || dstX < 0 || dstY < 0) continue;
-        if (dstX + dstW > this.textureWidth || dstY + dstH > this.textureHeight) continue;
-
-        if (this._bgTmpCanvas.width !== dstW || this._bgTmpCanvas.height !== dstH) {
-          this._bgTmpCanvas.width = dstW;
-          this._bgTmpCanvas.height = dstH;
-        }
-
-        try {
-          this._bgTmpCtx.clearRect(0, 0, dstW, dstH);
-          if (this.staticSnapshotCanvas) {
-            this._bgTmpCtx.drawImage(this.staticSnapshotCanvas, dstX, dstY, dstW, dstH, 0, 0, dstW, dstH);
-          }
-          this._bgTmpCtx.drawImage(hexCanvas, sx, sy, sw, sh, 0, 0, dstW, dstH);
-          this.backend.uploadRegion(dstX, dstY, this._bgTmpCanvas);
-        } catch(e) {}
+      if (this._bgTmpCanvas.width !== dstW || this._bgTmpCanvas.height !== dstH) {
+        this._bgTmpCanvas.width = dstW;
+        this._bgTmpCanvas.height = dstH;
       }
+
+      try {
+        this._bgTmpCtx.clearRect(0, 0, dstW, dstH);
+        if (this.staticSnapshotCanvas) {
+          this._bgTmpCtx.drawImage(this.staticSnapshotCanvas, dstX, dstY, dstW, dstH, 0, 0, dstW, dstH);
+        }
+        this._bgTmpCtx.drawImage(hexCanvas, 0, 0, hexCanvas.width, hexCanvas.height, 0, 0, dstW, dstH);
+        this.backend.uploadRegion(dstX, dstY, this._bgTmpCanvas);
+      } catch (e) {}
     }
 
     _updateDynamicVideos() {
