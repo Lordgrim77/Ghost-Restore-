@@ -118,16 +118,21 @@ elif [ ! -f "$INSTALL_DIR/bot.py" ]; then
   fi
 fi
 
-# Ensure backups directory exists
+# Ensure backups and support vault directories exist
 mkdir -p "$GHOST_DIR/backups"
+mkdir -p "$GHOST_DIR/support_vault/evidence"
+chmod -R 775 "$GHOST_DIR/support_vault" 2>/dev/null || true
 
 # Write .env file
 echo -e "Writing configuration to $INSTALL_DIR/.env..."
 cat <<EOF > "$INSTALL_DIR/.env"
 TELEGRAM_BOT_TOKEN=$BOT_TOKEN
 ALLOWED_USER_IDS=$ADMIN_ID
+ADMIN_CHAT_ID=$ADMIN_ID
 GHOST_DIR=$GHOST_DIR
 BACKUPS_DIR=$GHOST_DIR/backups
+SUPPORT_HOST=127.0.0.1
+SUPPORT_PORT=8080
 EOF
 chmod 600 "$INSTALL_DIR/.env"
 
