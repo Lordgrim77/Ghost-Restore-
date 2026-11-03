@@ -1,0 +1,270 @@
+{{!< default}}
+
+<div class="content-area gm-team-page-wrapper">
+<main class="site-main">
+    <div class="page-team gm-team-canvas">
+
+        {{!-- Top Telemetry Coordinate Bar --}}
+        <div class="gm-team-telemetry-strip">
+            <div class="gm-team-telemetry-left">
+                <span class="gm-telemetry-target-icon">⊙</span>
+                <span class="gm-telemetry-label">[ INTELLIGENCE &amp; OPERATIONS DIVISION // DIRECTORY-v4.2 ]</span>
+            </div>
+            <div class="gm-team-telemetry-right">
+                <span class="gm-telemetry-time" id="gm-live-utc-clock">UTC: 2026-11-03 // 12:00:00</span>
+                <span class="gm-telemetry-status-pill">
+                    <span class="gm-telemetry-status-dot"></span>
+                    <span class="gm-telemetry-status-text">LIVE LINK: SECURE ENCLAVE 01</span>
+                </span>
+            </div>
+        </div>
+
+        {{!-- Hero / Page Header --}}
+        <header class="gm-team-page-hero">
+            <h1 class="gm-team-page-title">{{#post}}{{title}}{{else}}{{t "OUR TEAM & OPERATIVES"}}{{/post}}</h1>
+            {{#post}}
+                {{#if custom_excerpt}}
+                    <p class="gm-team-page-subtitle">{{custom_excerpt}}</p>
+                {{else}}
+                    <p class="gm-team-page-subtitle">{{t "Meet the investigators, forensic specialists, and intelligence analysts protecting digital frontiers through evidence-based research, cryptographic tracing, and adversarial mapping."}}</p>
+                {{/if}}
+            {{else}}
+                <p class="gm-team-page-subtitle">{{t "Meet the investigators, forensic specialists, and intelligence analysts protecting digital frontiers through evidence-based research, cryptographic tracing, and adversarial mapping."}}</p>
+            {{/post}}
+
+            {{!-- 4-Metric Telemetry HUD Strip --}}
+            <div class="gm-team-hud-metrics">
+                <div class="gm-team-hud-box specular-rim">
+                    <div class="gm-hud-box-header">
+                        <span class="gm-hud-label">{{t "ACTIVE OPERATIVES"}}</span>
+                        <span class="gm-hud-pulse-dot" title="Active Field Units"></span>
+                    </div>
+                    <div class="gm-hud-value" id="gm-hud-active-count">6</div>
+                    <div class="gm-hud-subtext">{{t "Full Tier-4 Field Verification"}}</div>
+                </div>
+
+                <div class="gm-team-hud-box specular-rim">
+                    <div class="gm-hud-box-header">
+                        <span class="gm-hud-label">{{t "OPERATIONS CONCLUDED"}}</span>
+                        <span class="gm-hud-badge-green">+18% YOY</span>
+                    </div>
+                    <div class="gm-hud-value">84</div>
+                    <div class="gm-hud-subtext">{{t "Court-admissible forensicated nodes"}}</div>
+                </div>
+
+                <div class="gm-team-hud-box specular-rim">
+                    <div class="gm-hud-box-header">
+                        <span class="gm-hud-label">{{t "JURISDICTIONS"}}</span>
+                        <svg class="gm-hud-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                    </div>
+                    <div class="gm-hud-value">{{t "Global"}}</div>
+                    <div class="gm-hud-subtext">{{t "Multi-agency tactical coordinate mesh"}}</div>
+                </div>
+
+                <div class="gm-team-hud-box specular-rim">
+                    <div class="gm-hud-box-header">
+                        <span class="gm-hud-label">{{t "READINESS STATUS"}}</span>
+                        <span class="gm-hud-badge-dim">{{t "NOMINAL"}}</span>
+                    </div>
+                    <div class="gm-hud-value">{{t "DEFCON 4"}}</div>
+                    <div class="gm-hud-subtext">{{t "ALL SIGINT telemetry pipelines operational"}}</div>
+                </div>
+            </div>
+
+            {{!-- Department Filter Controls --}}
+            <div class="gm-team-filter-controls-wrap">
+                <div class="gm-team-filter-bar" id="gm-team-filters">
+                    <button type="button" class="gm-team-filter-btn is-active" data-filter="all">[ {{t "ALL PERSONNEL"}} <span id="gm-filter-total-count">(6)</span> ]</button>
+                    <button type="button" class="gm-team-filter-btn" data-filter="Leadership">[ {{t "LEADERSHIP & CORE"}} ]</button>
+                    <button type="button" class="gm-team-filter-btn" data-filter="Digital Forensics">[ {{t "DIGITAL FORENSICS"}} ]</button>
+                    <button type="button" class="gm-team-filter-btn" data-filter="Intelligence">[ {{t "OSINT INTELLIGENCE"}} ]</button>
+                    <button type="button" class="gm-team-filter-btn" data-filter="Adversary Tracking">[ {{t "ADVERSARY TRACKING"}} ]</button>
+                    <button type="button" class="gm-team-filter-btn" data-filter="Advisory & Legal">[ {{t "ADVISORY & LEGAL"}} ]</button>
+                </div>
+                <div class="gm-team-sort-indicator">
+                    <span class="gm-team-sort-label">{{t "SORT: CLEARANCE (DESC)"}}</span>
+                    <span class="gm-team-grid-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        {{!-- Team Cards Grid Section --}}
+        <section class="gm-team-section-container">
+            <div id="gm-team-grid" class="gm-team-grid" data-team-loaded="false">
+                {{!-- Initial SSR Fallback: Ghost Native Authors Scraped by team-page.js --}}
+                {{#get "authors" limit="all" include="count.posts" order="count.posts desc"}}
+                    {{#foreach authors}}
+                        <div class="gm-team-card-ssr" 
+                             style="display:none;"
+                             data-slug="{{slug}}" 
+                             data-name="{{name}}" 
+                             data-posts="{{count.posts}}"
+                             data-url="{{url}}">
+                            {{#if profile_image}}<span data-field="avatar">{{img_url profile_image size="m"}}</span>{{/if}}
+                            {{#if location}}<span data-field="location">{{location}}</span>{{/if}}
+                            {{#if bio}}<span data-field="bio">{{bio}}</span>{{/if}}
+                            {{#if website}}<span data-field="website">{{website}}</span>{{/if}}
+                            {{#if twitter}}<span data-field="twitter">{{twitter_url}}</span>{{/if}}
+                            {{#if facebook}}<span data-field="facebook">{{facebook_url}}</span>{{/if}}
+                        </div>
+                    {{/foreach}}
+                {{/get}}
+            </div>
+        </section>
+
+        {{!-- Institutional Forensic Integrity & Strict Chain of Custody Covenant Section --}}
+        <section class="gm-team-charter-section specular-rim">
+            <div class="gm-team-charter-header">
+                <div class="gm-team-charter-title-wrap">
+                    <span class="gm-team-charter-tag">[ {{t "OPERATIONAL STANDARDS & INTEGRITY COVENANT"}} ]</span>
+                    <h2 class="gm-team-charter-title">{{t "Forensic Integrity & Strict Chain of Custody"}}</h2>
+                </div>
+                <div class="gm-team-charter-badge">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+                    <span>ISO/IEC 27037 &amp; NIST SP 800-86 CERTIFIED</span>
+                </div>
+            </div>
+
+            <div class="gm-team-charter-grid">
+                <div class="gm-team-charter-card">
+                    <div class="gm-charter-card-title">
+                        <span class="gm-charter-dot">▪</span>
+                        <span>{{t "Cryptographic Custody"}}</span>
+                    </div>
+                    <p class="gm-charter-card-desc">
+                        {{t "All extracted digital evidence is hashed via dual SHA-256 and BLAKE3 algorithms at the microsecond of acquisition to guarantee zero data alteration."}}
+                    </p>
+                </div>
+
+                <div class="gm-team-charter-card">
+                    <div class="gm-charter-card-title">
+                        <span class="gm-charter-dot">▪</span>
+                        <span>{{t "Non-Attributable OSINT"}}</span>
+                    </div>
+                    <p class="gm-charter-card-desc">
+                        {{t "Intelligence harvesting adheres to strict air-gapped compartmentalization protocols preventing passive target detection and preserving asset security."}}
+                    </p>
+                </div>
+
+                <div class="gm-team-charter-card">
+                    <div class="gm-charter-card-title">
+                        <span class="gm-charter-dot">▪</span>
+                        <span>{{t "Admissible Hand-offs"}}</span>
+                    </div>
+                    <p class="gm-charter-card-desc">
+                        {{t "Intelligence packages are formatted in accordance with mutual international MLAT treaties to expedite direct hand-off to federal authorities."}}
+                    </p>
+                </div>
+            </div>
+        </section>
+
+    </div>
+</main>
+</div>
+
+{{!-- Inline Embedded Team Config (Fallback & Quick-Edit Source) --}}
+<script id="gm-team-default-data" type="application/json">
+[
+  {
+    "order": 1,
+    "slug": "admin",
+    "alt_slug": "xlordgrim",
+    "name": "LordGrim",
+    "title": "Lead Investigator & Founder",
+    "code": "OP-702 // LEVEL-4",
+    "badge": "VERIFIED",
+    "division": "Special Operations // Unit 01",
+    "department": "Leadership",
+    "location": "Global Operations",
+    "bio": "Veteran dark web intelligence specialist leading non-attributable reconnaissance and targeted cyber investigations. Orchestrates cross-border task forces bridging cryptographic tracking and law enforcement prosecution vectors.",
+    "specialties": ["Deep Web Infiltration", "Cryptographic Attribution", "Cross-Border Intel"],
+    "pgp": "9B44...F12E",
+    "status": "active",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 2,
+    "name": "Dr. Elena Rostova",
+    "slug": "",
+    "title": "Chief Forensic Specialist",
+    "code": "OP-814 // LEVEL-4",
+    "badge": "VERIFIED",
+    "division": "Digital Forensics Unit",
+    "department": "Digital Forensics",
+    "location": "European Division",
+    "bio": "Pioneer in non-volatile memory carving and hardware security module de-obfuscation. Specializes in recovering scrubbed state traces from anti-forensic operational storage and targeted payload execution pipelines.",
+    "specialties": ["Memory Dump Carving", "Malware Reverse Eng.", "Hardware HSM Extraction"],
+    "pgp": "44CE...892A",
+    "status": "active",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 3,
+    "name": "Marcus Chen",
+    "slug": "",
+    "title": "Senior OSINT & Geolocation Analyst",
+    "code": "OP-933 // LEVEL-4",
+    "badge": "VERIFIED",
+    "division": "Adversarial Telemetry",
+    "department": "Intelligence",
+    "location": "Asia-Pacific Command",
+    "bio": "Global OSINT specialist recognized for sub-meter shadow chronolocation and mesh network topological de-masking. Converts disparate open source noise into actionable GPS vector coordinates for tactical field validation.",
+    "specialties": ["Satellite Imagery OSINT", "Chronolocation", "Darknet Topology"],
+    "pgp": "EE71...C809",
+    "status": "active",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 4,
+    "name": "Aria Sterling",
+    "slug": "",
+    "title": "Lead Blockchain & Financial Forensics",
+    "code": "OP-640 // LEVEL-4",
+    "badge": "VERIFIED",
+    "division": "Financial Crimes Intelligence",
+    "department": "Adversary Tracking",
+    "location": "Americas Division",
+    "bio": "Specialized in dissecting multi-hop mixing services, confidential compute smart contracts, and unhosted ledger hops. Has uncovered over $420M in illicit adversarial infrastructure funding flows for federal asset forfeiture.",
+    "specialties": ["Mixer De-anonymization", "Smart Contract Audits", "Asset Seizure Tracing"],
+    "pgp": "33A0...D189",
+    "status": "active",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 5,
+    "name": "David \"Cipher\" Novak",
+    "slug": "",
+    "title": "Hardware & Mobile Forensics Specialist",
+    "code": "OP-519 // LEVEL-4",
+    "badge": "VERIFIED",
+    "division": "Hardware Exploitation Lab",
+    "department": "Digital Forensics",
+    "location": "Central European Hub",
+    "bio": "Focuses on physical hardware bypasses, NAND direct chip-off extraction, and baseband protocol interception. Capable of extracting plaintext cryptographic keys from partially sabotaged or encrypted mobile hardware.",
+    "specialties": ["JTAG / Chip-Off Forensics", "Baseband Intercepts", "Firmware Audits"],
+    "pgp": "51FB...43D7",
+    "status": "active",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 6,
+    "name": "Sofia Al-Mansoor, Esq.",
+    "slug": "",
+    "title": "Senior Legal Counsel & Compliance Liaison",
+    "code": "OP-308 // LEVEL-4",
+    "badge": "VERIFIED",
+    "division": "Advisory & Legal Affairs",
+    "department": "Advisory & Legal",
+    "location": "International Liaison",
+    "bio": "Coordinates MLAT cross-border legal warrants, evidence handling compliance, and custodial chain audits. Guarantees that every digital artifact generated satisfies strict evidentiary standards in domestic and international courts.",
+    "specialties": ["MLAT Treaties", "Evidence Admissibility", "Human Rights Law"],
+    "pgp": "7E12...0A45",
+    "status": "active",
+    "telegram": "https://t.me/StopAbuseTeam"
+  }
+]
+</script>
+
+<script src="{{asset "built/team-page.js"}}?v=stitch-v2"></script>
