@@ -1,5 +1,15 @@
 {{!< default}}
 
+<style>
+/* Strictly disable background digital rain canvas on support intake portal */
+#gm-cyber-hex-canvas {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+</style>
+
 {{#if @member}}
 <script>
 window.GHOST_MEMBER = {
@@ -1088,18 +1098,45 @@ html.light-mode .gm-empty-desc {
     color: #64748b;
 }
 .gm-empty-cta {
-    background: #38bdf8;
-    color: #040609;
+    background-color: #ffffff !important;
+    color: #040609 !important;
     font-size: 13px;
     font-weight: 700;
     padding: 10px 20px;
     border-radius: 999px;
-    border: none;
+    border: 1px solid #ffffff !important;
     cursor: pointer;
+    transition: all 0.2s ease;
 }
+.gm-empty-cta *,
+.gm-empty-cta span {
+    color: #040609 !important;
+}
+.gm-empty-cta:hover {
+    background-color: #e2e8f0 !important;
+    border-color: #e2e8f0 !important;
+}
+.gm-empty-cta:hover *,
+.gm-empty-cta:hover span {
+    color: #040609 !important;
+}
+
 html.light-mode .gm-empty-cta {
-    background: #0284c7;
-    color: #ffffff;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    border: 1px solid #0f172a !important;
+}
+html.light-mode .gm-empty-cta *,
+html.light-mode .gm-empty-cta span {
+    color: #ffffff !important;
+}
+html.light-mode .gm-empty-cta:hover {
+    background-color: #1e293b !important;
+    border-color: #1e293b !important;
+}
+html.light-mode .gm-empty-cta:hover *,
+html.light-mode .gm-empty-cta:hover span {
+    color: #ffffff !important;
 }
 
 /* Cases Card List */
@@ -1223,19 +1260,46 @@ html.light-mode .gm-case-card-desc {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: #ffffff;
-    color: #040609;
+    background-color: #ffffff !important;
+    color: #040609 !important;
     font-size: 12px;
     font-weight: 800;
     padding: 8px 16px;
     border-radius: 999px;
-    border: none;
+    border: 1px solid #ffffff !important;
     cursor: pointer;
     transition: all 0.2s ease;
 }
+.gm-open-case-btn *,
+.gm-open-case-btn span {
+    color: #040609 !important;
+}
+.gm-open-case-btn:hover {
+    background-color: #e2e8f0 !important;
+    border-color: #e2e8f0 !important;
+    transform: translateY(-1px);
+}
+.gm-open-case-btn:hover *,
+.gm-open-case-btn:hover span {
+    color: #040609 !important;
+}
+
 html.light-mode .gm-open-case-btn {
-    background: #0f172a;
-    color: #ffffff;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    border: 1px solid #0f172a !important;
+}
+html.light-mode .gm-open-case-btn *,
+html.light-mode .gm-open-case-btn span {
+    color: #ffffff !important;
+}
+html.light-mode .gm-open-case-btn:hover {
+    background-color: #1e293b !important;
+    border-color: #1e293b !important;
+}
+html.light-mode .gm-open-case-btn:hover *,
+html.light-mode .gm-open-case-btn:hover span {
+    color: #ffffff !important;
 }
 .gm-open-case-btn:hover {
     transform: translateY(-1px);
@@ -1285,15 +1349,46 @@ html.light-mode .gm-lookup-sub {
     font-size: 14px;
     font-weight: 700;
     border-radius: 999px;
-    background: #ffffff;
-    color: #040609;
-    border: none;
+    background-color: #ffffff !important;
+    color: #040609 !important;
+    border: 1px solid #ffffff !important;
     cursor: pointer;
     transition: all 0.2s ease;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
+.gm-lookup-btn *,
+.gm-lookup-btn span {
+    color: #040609 !important;
+}
+.gm-lookup-btn:hover {
+    background-color: #e2e8f0 !important;
+    border-color: #e2e8f0 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(255, 255, 255, 0.15);
+}
+.gm-lookup-btn:hover *,
+.gm-lookup-btn:hover span {
+    color: #040609 !important;
+}
+
 html.light-mode .gm-lookup-btn {
-    background: #0f172a;
-    color: #ffffff;
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+    border: 1px solid #0f172a !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+}
+html.light-mode .gm-lookup-btn *,
+html.light-mode .gm-lookup-btn span {
+    color: #ffffff !important;
+}
+html.light-mode .gm-lookup-btn:hover {
+    background-color: #1e293b !important;
+    border-color: #1e293b !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+html.light-mode .gm-lookup-btn:hover *,
+html.light-mode .gm-lookup-btn:hover span {
+    color: #ffffff !important;
 }
 
 /* Dashboard Summary Card */
@@ -2422,6 +2517,9 @@ html.light-mode .gm-chat-send-btn {
             prompt('Copy text:', text);
         });
     };
+
+    // Remove any canvas on support page
+    const c = document.getElementById('gm-cyber-hex-canvas'); if (c) c.remove();
 
     // Initialize state
     if (window.GHOST_MEMBER && window.GHOST_MEMBER.loggedIn) {
