@@ -48,10 +48,20 @@ curl -sSL "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$TARGET_DIR/bot.py"
 curl -sSL "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$TARGET_DIR/support_hub.py"
 curl -sSL "$RAW_BASE/ghost_manager.py?v=$CACHE_BUSTER" -o "$TARGET_DIR/ghost_manager.py"
 curl -sSL "$RAW_BASE/requirements.txt?v=$CACHE_BUSTER" -o "$TARGET_DIR/requirements.txt"
+curl -sSL "$RAW_BASE/page-support.hbs?v=$CACHE_BUSTER" -o "$TARGET_DIR/page-support.hbs"
+
+# Sync latest page-support.hbs directly into active Alto theme directories if present
+for theme_dir in "$GHOST_DIR/content/themes/alto" "/var/www/ghost/content/themes/alto"; do
+  if [ -d "$theme_dir" ]; then
+    cp -f "$TARGET_DIR/page-support.hbs" "$theme_dir/page-support.hbs" 2>/dev/null || true
+    chown -R ghost:ghost "$theme_dir/page-support.hbs" 2>/dev/null || true
+    echo -e "  ✓ Updated page-support.hbs in $theme_dir"
+  fi
+done
 
 # Keep /var/www/ghost/Ghost-Restore in sync as well
 if [ "$TARGET_DIR" != "$GHOST_DIR/Ghost-Restore" ]; then
-  cp -f "$TARGET_DIR/bot.py" "$TARGET_DIR/support_hub.py" "$TARGET_DIR/ghost_manager.py" "$TARGET_DIR/requirements.txt" "$GHOST_DIR/Ghost-Restore/" 2>/dev/null || true
+  cp -f "$TARGET_DIR/bot.py" "$TARGET_DIR/support_hub.py" "$TARGET_DIR/ghost_manager.py" "$TARGET_DIR/requirements.txt" "$TARGET_DIR/page-support.hbs" "$GHOST_DIR/Ghost-Restore/" 2>/dev/null || true
 fi
 
 cd "$TARGET_DIR"

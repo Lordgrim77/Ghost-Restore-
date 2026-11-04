@@ -145,12 +145,31 @@ class SupportVault:
                 reporter_alias TEXT,
                 reporter_contact TEXT,
                 ip_hash TEXT,
+                member_email TEXT,
+                member_uuid TEXT,
                 telegram_message_id INTEGER,
                 resolution_note TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """)
+            # Auto-migrate existing DBs for member tracking
+            for col_sql in [
+                "ALTER TABLE cases ADD COLUMN member_email TEXT",
+                "ALTER TABLE cases ADD COLUMN member_uuid TEXT"
+            ]:
+                try:
+                    conn.execute(col_sql)
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_member_email ON cases(member_email)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_member_uuid ON cases(member_uuid)")
+                conn.commit()
+            except Exception:
+                pass
+
             conn.execute("""
             CREATE TABLE IF NOT EXISTS evidence_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,10 +215,14 @@ class SupportVault:
         reporter_alias: Optional[str] = None,
         reporter_contact: Optional[str] = None,
         ip_hash: Optional[str] = None,
+        member_email: Optional[str] = None,
+        member_uuid: Optional[str] = None,
     ) -> Dict[str, Any]:
         case_code = f"CASE-{secrets.randbelow(9000) + 1000}-{secrets.token_hex(2).upper()}"
         access_key = secrets.token_hex(16)
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        clean_email = (member_email or "").strip().lower() or None
+        clean_uuid = (member_uuid or "").strip() or None
 
         with self._get_conn() as conn:
             conn.execute(
@@ -207,13 +230,13 @@ class SupportVault:
                 INSERT INTO cases (
                     case_code, access_key, category, priority, status,
                     subject, description, reporter_alias, reporter_contact,
-                    ip_hash, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?)
+                    ip_hash, member_email, member_uuid, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     case_code, access_key, category, priority,
                     subject, description, reporter_alias or "Anonymous",
-                    reporter_contact, ip_hash, now, now
+                    reporter_contact, ip_hash, clean_email, clean_uuid, now, now
                 )
             )
             conn.execute(
@@ -230,8 +253,66 @@ class SupportVault:
             "status": "SUBMITTED",
             "subject": subject,
             "description": description,
+            "member_email": clean_email,
             "created_at": now
         }
+
+    def list_member_cases(self, member_email: str, member_uuid: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        clean_email = (member_email or "").strip().lower()
+        clean_uuid = (member_uuid or "").strip()
+        if not clean_email and not clean_uuid:
+            return []
+
+        seen_codes = set()
+        member_cases = []
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    if clean_email and clean_uuid:
+                        rows = conn.execute(
+                            """
+                            SELECT case_code, access_key, category, priority, status, subject,
+                                   description, reporter_alias, created_at, updated_at
+                            FROM cases
+                            WHERE LOWER(member_email) = ? OR member_uuid = ?
+                            ORDER BY id DESC LIMIT ?
+                            """,
+                            (clean_email, clean_uuid, limit)
+                        ).fetchall()
+                    elif clean_email:
+                        rows = conn.execute(
+                            """
+                            SELECT case_code, access_key, category, priority, status, subject,
+                                   description, reporter_alias, created_at, updated_at
+                            FROM cases
+                            WHERE LOWER(member_email) = ?
+                            ORDER BY id DESC LIMIT ?
+                            """,
+                            (clean_email, limit)
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            """
+                            SELECT case_code, access_key, category, priority, status, subject,
+                                   description, reporter_alias, created_at, updated_at
+                            FROM cases
+                            WHERE member_uuid = ?
+                            ORDER BY id DESC LIMIT ?
+                            """,
+                            (clean_uuid, limit)
+                        ).fetchall()
+
+                    for r in rows:
+                        d = dict(r)
+                        if d["case_code"] not in seen_codes:
+                            seen_codes.add(d["case_code"])
+                            member_cases.append(d)
+            except Exception:
+                pass
+
+        member_cases.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+        return member_cases[:limit]
 
     def _candidate_dbs(self) -> List[str]:
         candidates = [
@@ -490,6 +571,11 @@ class SupportBotBridge:
         ip_hash = html.escape(str(case_data.get('ip_hash') or 'N/A')[:10])
         created_at = str(case_data.get('created_at') or '')[:19].replace('T', ' ')
 
+        member_line = ""
+        if case_data.get("member_email"):
+            m_esc = html.escape(str(case_data["member_email"]))
+            member_line = f"👤 <b>Ghost Member:</b> <code>{m_esc}</code>\n"
+
         note_text = ""
         if case_data.get("resolution_note"):
             clean_note = html.escape(str(case_data['resolution_note']))
@@ -502,6 +588,7 @@ class SupportBotBridge:
             f"⚡ <b>Priority:</b> {p_display}\n"
             f"🕒 <b>Submitted:</b> {created_at} UTC\n"
             f"👤 <b>Reporter:</b> {reporter} [Hash: <code>{ip_hash}</code>]\n"
+            f"{member_line}"
             f"{files_text}\n"
             f"📝 <b>Subject:</b> {subject}\n"
             f"📄 <b>Description:</b>\n"
@@ -984,6 +1071,8 @@ class SupportApiServer:
                 priority = params.get("priority", "STANDARD").strip().upper()
                 alias = params.get("reporter_alias", "Anonymous").strip() or "Anonymous"
                 contact = params.get("reporter_contact", "").strip()
+                member_email = params.get("member_email", "").strip().lower()
+                member_uuid = params.get("member_uuid", "").strip()
 
                 if not subject or not description:
                     await self._send_response(writer, 400, {"error": "Subject and Detailed Description are required fields."})
@@ -997,7 +1086,9 @@ class SupportApiServer:
                     description=description,
                     reporter_alias=alias,
                     reporter_contact=contact,
-                    ip_hash=ip_hash
+                    ip_hash=ip_hash,
+                    member_email=member_email or None,
+                    member_uuid=member_uuid or None
                 )
                 case_code = case_res["case_code"]
 
@@ -1018,6 +1109,23 @@ class SupportApiServer:
                     "access_key": case_res["access_key"],
                     "status": "SUBMITTED",
                     "file_count": len(saved_files)
+                })
+                return
+
+            # -------------------------------------------------------------
+            # GET /member/cases or /cases/member (List Member's Past Cases)
+            # -------------------------------------------------------------
+            elif method == "GET" and route_path in ("/member/cases", "/cases/member"):
+                m_email = query.get("email", "").strip().lower()
+                m_uuid = query.get("uuid", "").strip()
+                if not m_email and not m_uuid:
+                    await self._send_response(writer, 400, {"error": "Email or member UUID required."})
+                    return
+
+                cases = self.vault.list_member_cases(member_email=m_email, member_uuid=m_uuid)
+                await self._send_response(writer, 200, {
+                    "success": True,
+                    "cases": cases
                 })
                 return
 
