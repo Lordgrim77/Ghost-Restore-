@@ -47,8 +47,10 @@ with zipfile.ZipFile('/tmp/alto-theme-latest.zip', 'r') as zf:
 "
 sudo rm -f /tmp/alto-theme-latest.zip
 
-# Ensure clean page-support.hbs is in place
+# Ensure clean page-support.hbs, page-about.hbs, and page-team.hbs are in place
 sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/page-support.hbs?v=$CACHE_BUSTER" -o "$THEME_DIR/page-support.hbs"
+sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/page-about.hbs?v=$CACHE_BUSTER" -o "$THEME_DIR/page-about.hbs" 2>/dev/null || true
+sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/page-team.hbs?v=$CACHE_BUSTER" -o "$THEME_DIR/page-team.hbs" 2>/dev/null || true
 
 # 2. Update routes.yaml if settings dir exists
 echo -e "${BLUE}[3/6] Configuring content routes (routes.yaml)...${NC}"
