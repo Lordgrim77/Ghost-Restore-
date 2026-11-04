@@ -5,8 +5,22 @@
     "alt_slug": "xlordgrim",
     "name": "LordGrim",
     "title": "Lead Investigator & Developer",
-    "badge": "VERIFIED OPERATIVE",
-    "specialty": "Digital Forensics & OSINT",
+    "location": "Global Operations",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 2,
+    "slug": "analyst-1",
+    "name": "Cyber Forensic Analyst",
+    "title": "Digital Forensics & Incident Response",
+    "location": "Forensics Lab",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 3,
+    "slug": "intel-lead",
+    "name": "OSINT Investigator",
+    "title": "Open Source Intelligence & Threat Tracking",
     "location": "Global Operations",
     "telegram": "https://t.me/StopAbuseTeam"
   }

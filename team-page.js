@@ -1,6 +1,6 @@
 /**
- * Ghost Alto Theme - Team Page Engine (Ultra-Premium Redesign)
- * Cyber Intelligence & Forensic Operative Cards
+ * Ghost Alto Theme - Team Page Engine (Ultra-Clean Monochromatic Edition)
+ * Minimalist Editorial Black & White Style
  */
 (function() {
     'use strict';
@@ -108,11 +108,10 @@
                 if (slug) processedSlugs.add(slug);
                 if (altSlug) processedSlugs.add(altSlug);
 
-                // Prefer explicit member.name if custom-configured, otherwise fall back to staff.name
-                const resolvedName = member.name || (staff && staff.name ? staff.name : 'Operative');
-                const resolvedBio = member.bio || (staff && staff.bio ? staff.bio : 'Lead Investigator & Security Researcher. Focused on digital forensics, OSINT, and threat actor infrastructure analysis.');
+                const resolvedName = member.name || (staff && staff.name ? staff.name : 'Team Member');
+                const resolvedBio = member.bio || (staff && staff.bio ? staff.bio : '');
                 const resolvedAvatar = (staff && staff.avatar) ? staff.avatar : (member.avatar || '');
-                const resolvedLocation = member.location || (staff && staff.location ? staff.location : 'Global Operations');
+                const resolvedLocation = member.location || (staff && staff.location ? staff.location : '');
                 const resolvedWebsite = member.website || (staff && staff.website ? staff.website : '');
                 const resolvedTwitter = member.twitter || (staff && staff.twitter ? staff.twitter : '');
                 const resolvedFacebook = member.facebook || (staff && staff.facebook ? staff.facebook : '');
@@ -123,16 +122,16 @@
                     order: typeof member.order === 'number' ? member.order : (idx + 1),
                     name: resolvedName,
                     slug: slug || (staff ? staff.slug : 'operative'),
-                    title: member.title || (staff && staff.location ? staff.location : 'Lead Investigator & Developer'),
-                    badge: member.badge || 'VERIFIED OPERATIVE',
-                    specialty: member.specialty || 'Digital Forensics & OSINT',
+                    title: member.title || (staff && staff.location ? staff.location : 'Team Member'),
+                    badge: member.badge || '',
+                    specialty: member.specialty || '',
                     location: resolvedLocation,
                     bio: resolvedBio,
                     avatar: resolvedAvatar,
                     website: resolvedWebsite,
                     twitter: resolvedTwitter,
                     facebook: resolvedFacebook,
-                    telegram: member.telegram || 'https://t.me/StopAbuseTeam',
+                    telegram: member.telegram || '',
                     github: member.github || '',
                     email: member.email || '',
                     url: resolvedUrl,
@@ -153,11 +152,11 @@
                 order: 100 + opIdx,
                 name: staff.name,
                 slug: staff.slug,
-                title: staff.location || 'Staff Contributor',
-                badge: 'FIELD RESEARCHER',
-                specialty: 'Intelligence Analysis',
-                location: staff.location || 'Distributed',
-                bio: staff.bio || 'Investigator & Research Contributor protecting digital frontiers.',
+                title: staff.location || 'Contributor',
+                badge: '',
+                specialty: '',
+                location: staff.location || '',
+                bio: staff.bio || '',
                 avatar: staff.avatar,
                 website: staff.website,
                 twitter: staff.twitter,
@@ -173,35 +172,34 @@
         // Step C: Sort strictly by manual order
         mergedList.sort((a, b) => a.order - b.order);
 
-        // Step D: Render ultra-premium cyberpunk profile cards
-        const cardsHtml = mergedList.map((member, index) => {
+        // Step D: Render clean, compact, black & white cards
+        const cardsHtml = mergedList.map(member => {
             const authorUrl = member.url;
-            const opCode = `OP-${String(member.order || (index + 1)).padStart(2, '0')}`;
 
-            // Social links
+            // Social links (Clean Monochromatic Icons)
             let linksHtml = '';
             if (member.telegram) {
                 linksHtml += `
-                    <a href="${escapeHtml(member.telegram)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Telegram" title="Encrypted Telegram Channel">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                    <a href="${escapeHtml(member.telegram)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Telegram" title="Telegram">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
                     </a>`;
             }
             if (member.twitter) {
                 linksHtml += `
-                    <a href="${escapeHtml(member.twitter)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Twitter / X" title="X / Twitter">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"/></svg>
+                    <a href="${escapeHtml(member.twitter)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Twitter / X" title="X">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"/></svg>
                     </a>`;
             }
             if (member.github) {
                 linksHtml += `
                     <a href="${escapeHtml(member.github)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="GitHub" title="GitHub">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
                     </a>`;
             }
             if (member.website) {
                 linksHtml += `
-                    <a href="${escapeHtml(member.website)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Website" title="Personal Portal">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    <a href="${escapeHtml(member.website)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Website" title="Website">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                     </a>`;
             }
 
@@ -222,40 +220,23 @@
             if (authorUrl) {
                 ctaHtml = `
                     <a href="${escapeHtml(authorUrl)}" class="gm-team-cta-btn">
-                        <span>View Dossier &amp; Dispatches</span>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        <span>View Profile</span>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     </a>`;
             } else if (member.telegram || member.website) {
                 ctaHtml = `
                     <a href="${escapeHtml(member.telegram || member.website)}" target="_blank" rel="noopener noreferrer" class="gm-team-cta-btn">
-                        <span>Contact Operative</span>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        <span>Contact</span>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     </a>`;
             }
 
             return `
                 <article class="gm-team-card">
-                    <!-- Ambient Glow Behind Avatar -->
-                    <div class="gm-team-card-glow"></div>
-
-                    <!-- Top Status Bar & Tactical Metas -->
-                    <div class="gm-team-card-topbar">
-                        <div class="gm-team-badge-wrap">
-                            <span class="gm-team-status-dot"></span>
-                            <span class="gm-team-security-badge">${escapeHtml(member.badge)}</span>
-                        </div>
-                        <span class="gm-team-code-tag">${escapeHtml(opCode)} // SYS_ACTIVE</span>
-                    </div>
-
-                    <!-- Hero Identity Row -->
+                    <!-- Top Compact Identity Row -->
                     <div class="gm-team-hero-row">
                         <div class="gm-team-avatar-wrap">
-                            <div class="gm-team-avatar-ring">
-                                ${authorUrl ? `<a href="${escapeHtml(authorUrl)}">${avatarMarkup}</a>` : avatarMarkup}
-                            </div>
-                            <span class="gm-team-verified-check" title="Cryptographically Verified Identity">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                            </span>
+                            ${authorUrl ? `<a href="${escapeHtml(authorUrl)}">${avatarMarkup}</a>` : avatarMarkup}
                         </div>
                         <div class="gm-team-identity-info">
                             <h2 class="gm-team-name">
@@ -264,27 +245,14 @@
                             <span class="gm-team-role">${escapeHtml(member.title)}</span>
                             ${member.location ? `
                                 <div class="gm-team-location">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
                                     <span>${escapeHtml(member.location)}</span>
                                 </div>` : ''}
                         </div>
                     </div>
 
-                    <!-- Tactical Chips (Specialty & Dispatches Count) -->
-                    <div class="gm-team-chips-row">
-                        <span class="gm-team-chip">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                            <span>${escapeHtml(member.specialty)}</span>
-                        </span>
-                        ${member.postCount > 0 ? `
-                        <span class="gm-team-chip gm-team-chip-accent">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                            <span>${member.postCount} Dispatches Published</span>
-                        </span>` : ''}
-                    </div>
-
-                    <!-- Bio / Mission Briefing -->
-                    <p class="gm-team-bio">${escapeHtml(member.bio)}</p>
+                    <!-- Compact Bio -->
+                    ${member.bio ? `<p class="gm-team-bio">${escapeHtml(member.bio)}</p>` : ''}
 
                     <!-- Bottom Action Row -->
                     <div class="gm-team-card-footer">
