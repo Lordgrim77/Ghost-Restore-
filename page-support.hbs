@@ -1,15 +1,5 @@
 {{!< default}}
 
-<style>
-/* Strictly disable background digital rain canvas on support intake portal */
-#gm-cyber-hex-canvas {
-    display: none !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
-}
-</style>
-
 {{#if @member}}
 <script>
 window.GHOST_MEMBER = {
@@ -414,10 +404,7 @@ window.GHOST_MEMBER = {
 <!-- Responsive Styles for Modern, Clean Support Portal -->
 <!-- ============================================================= -->
 <style>
-/* Hide falling background canvas on support page */
-#gm-cyber-hex-canvas {
-    display: none !important;
-}
+/* Animated canvas active on support page */
 
 .gm-support-section {
     padding: 32px 20px 80px;
@@ -604,14 +591,18 @@ html.light-mode .gm-member-badge-sub {
 
 /* Form Container */
 .gm-support-form {
-    background: #0d1117;
-    border: 1px solid #30363d;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 16px;
     padding: 28px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 html.light-mode .gm-support-form {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-color: #e2e8f0;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
 }
@@ -1310,15 +1301,19 @@ html.light-mode .gm-open-case-btn:hover span {
 /* TAB 3: CASE LOOKUP & DASHBOARD STYLES */
 /* ============================================================= */
 .gm-lookup-card {
-    background: #0d1117;
-    border: 1px solid #30363d;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 16px;
     padding: 28px;
     margin-bottom: 24px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 html.light-mode .gm-lookup-card {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-color: #e2e8f0;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
 }
@@ -2519,7 +2514,7 @@ html.light-mode .gm-chat-send-btn {
     };
 
     // Remove any canvas on support page
-    const c = document.getElementById('gm-cyber-hex-canvas'); if (c) c.remove();
+    
 
     // Initialize state
     if (window.GHOST_MEMBER && window.GHOST_MEMBER.loggedIn) {
