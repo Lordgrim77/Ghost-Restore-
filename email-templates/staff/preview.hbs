@@ -5,7 +5,18 @@
   &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj; &zwnj;
 </span>
 
-{{#if siteLogo}}
+{{#if siteIconUrl}}
+<div style="text-align: center; margin-bottom: 24px; padding-top: 8px;">
+  <a href="{{siteUrl}}" target="_blank" style="text-decoration: none; display: inline-block; text-align: center;">
+    <img src="{{siteIconUrl}}" alt="{{siteTitle}}" width="52" height="52" style="border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.15); display: block; margin: 0 auto 10px auto; object-fit: cover; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);" />
+    {{#if siteLogo}}
+      <img src="{{siteLogo}}" alt="{{siteTitle}}" style="max-height: 38px; max-width: 200px; height: auto; width: auto; border: 0; display: block; margin: 0 auto; object-fit: contain;" />
+    {{else}}
+      <span style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 16px; font-weight: 800; letter-spacing: -0.01em; color: #ffffff; display: block; text-transform: uppercase;">{{siteTitle}}</span>
+    {{/if}}
+  </a>
+</div>
+{{else if siteLogo}}
 <div style="text-align: center; margin-bottom: 24px; padding-top: 8px;">
   <a href="{{siteUrl}}" target="_blank" style="text-decoration: none; display: inline-block;">
     <img src="{{siteLogo}}" alt="{{siteTitle}}" style="max-height: 44px; max-width: 220px; height: auto; width: auto; border: 0; display: block; margin: 0 auto; object-fit: contain;" />
