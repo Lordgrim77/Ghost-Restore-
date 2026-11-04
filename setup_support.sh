@@ -50,14 +50,16 @@ curl -sSL "$RAW_BASE/ghost_manager.py?v=$CACHE_BUSTER" -o "$TARGET_DIR/ghost_man
 curl -sSL "$RAW_BASE/requirements.txt?v=$CACHE_BUSTER" -o "$TARGET_DIR/requirements.txt"
 curl -sSL "$RAW_BASE/page-support.hbs?v=$CACHE_BUSTER" -o "$TARGET_DIR/page-support.hbs"
 
-# Sync latest page-support.hbs directly into active Alto theme directories if present
-for theme_dir in "$GHOST_DIR/content/themes/alto" "/var/www/ghost/content/themes/alto"; do
-  if [ -d "$theme_dir" ]; then
-    cp -f "$TARGET_DIR/page-support.hbs" "$theme_dir/page-support.hbs" 2>/dev/null || true
-    chown -R ghost:ghost "$theme_dir/page-support.hbs" 2>/dev/null || true
-    echo -e "  ✓ Updated page-support.hbs in $theme_dir"
-  fi
-done
+# Sync latest page-support.hbs directly into ALL installed Ghost themes
+if [ -d "$GHOST_DIR/content/themes" ]; then
+  for theme_dir in "$GHOST_DIR/content/themes"/*; do
+    if [ -d "$theme_dir" ]; then
+      cp -f "$TARGET_DIR/page-support.hbs" "$theme_dir/page-support.hbs" 2>/dev/null || true
+      chown -R ghost:ghost "$theme_dir/page-support.hbs" 2>/dev/null || true
+      echo -e "  ✓ Synced clean page-support.hbs into: $(basename "$theme_dir")"
+    fi
+  done
+fi
 
 # Keep /var/www/ghost/Ghost-Restore in sync as well
 if [ "$TARGET_DIR" != "$GHOST_DIR/Ghost-Restore" ]; then
@@ -198,6 +200,14 @@ else
   echo -e "${YELLOW}⚠️ Nginx syntax check failed. Reverting modified files...${NC}"
   find /etc/nginx/ -name "*.bak" -exec sh -c 'mv "$1" "${1%.bak}"' _ {} \;
 fi
+
+# Reload Ghost CMS to clear in-memory Handlebars template cache
+echo -e "${BLUE}Restarting Ghost CMS to clear template cache...${NC}"
+systemctl restart ghost_*.service 2>/dev/null || systemctl restart ghost.service 2>/dev/null || true
+if command -v ghost >/dev/null 2>&1; then
+  su - ghost -c "cd $GHOST_DIR && ghost restart" 2>/dev/null || true
+fi
+echo -e "${GREEN}✓ Ghost template cache cleared.${NC}"
 
 # Run Live Verification Tests
 echo ""
