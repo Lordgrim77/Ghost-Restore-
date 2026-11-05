@@ -1187,7 +1187,7 @@ class SupportApiServer:
                 c_nonce = params.get("captcha_nonce", "").strip()
 
                 if not c_id or not c_sig or not c_sol or not c_nonce:
-                    await self._send_response(writer, 400, {"error": "Anti-flooding security challenge is required. Please solve the verification puzzle."})
+                    await self._send_response(writer, 400, {"error": "Please solve the calculation puzzle to verify your submission."})
                     return
 
                 if not self.captcha.verify_challenge(c_id, c_ts, c_sig, c_sol, c_nonce):

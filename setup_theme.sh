@@ -216,7 +216,7 @@ if patched:
 ' 2>/dev/null || true
 
 # 7. Update Support Hub Daemon & Cryptographic Engine
-echo -e "${BLUE}[7/8] Updating Support Hub Daemon & Anti-Flooding Engine...${NC}"
+echo -e "${BLUE}[7/8] Updating Support Hub Daemon & Verification Engine...${NC}"
 sudo mkdir -p "$GHOST_DIR/Ghost-Restore"
 sudo mkdir -p "$GHOST_DIR/support_vault/evidence"
 sudo chmod -R 775 "$GHOST_DIR/support_vault" 2>/dev/null || true
@@ -298,7 +298,7 @@ echo -e "${GREEN}===============================================================
 echo -e "✓ Alto Theme installed cleanly in:     ${CYAN}$THEME_DIR${NC}"
 echo -e "✓ Support Portal active at:            ${CYAN}https://yourdomain.com/support/${NC}"
 echo -e "✓ Team Showcase active at:             ${CYAN}https://yourdomain.com/team/${NC}"
-echo -e "✓ Cryptographic Challenge Engine:      ${GREEN}ACTIVE & VERIFIED (port 8080)${NC}"
+echo -e "✓ Verification Challenge Engine:       ${GREEN}ACTIVE & VERIFIED (port 8080)${NC}"
 echo -e "✓ Email Templates updated in:          ${CYAN}$GHOST_DIR/current/core/${NC}"
 echo -e "✓ In-memory template cache:            ${GREEN}CLEARED${NC}"
 echo -e "${GREEN}==================================================================${NC}"

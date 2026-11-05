@@ -229,9 +229,9 @@ fi
 
 CAPTCHA_LOCAL=$(curl -s http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
 if [[ "$CAPTCHA_LOCAL" =~ "challenge_id" ]]; then
-  echo -e "  [2/3] Anti-Flooding Challenge Engine:    ${GREEN}ONLINE & VERIFIED [OK]${NC}"
+  echo -e "  [2/3] Verification Challenge Engine:      ${GREEN}ONLINE & VERIFIED [OK]${NC}"
 else
-  echo -e "  [2/3] Anti-Flooding Challenge Engine:    ${RED}NOT RESPONDING [FAIL]${NC}"
+  echo -e "  [2/3] Verification Challenge Engine:      ${RED}NOT RESPONDING [FAIL]${NC}"
 fi
 
 HEALTH_PROXY=$(curl -s http://127.0.0.1/api/support/health 2>/dev/null || echo "")
