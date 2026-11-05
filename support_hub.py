@@ -1269,7 +1269,7 @@ class SupportApiServer:
                     "error": "Direct web access to uploaded evidence is disabled for operational security. "
                              "Evidence files are sequestered in an isolated vault and accessible exclusively "
                              "by duty investigators via the verified operational Telegram Bot.",
-                    "vault_status": "VAULTED_FOR_BOT_TRIAGE_ONLY"
+                    "vault_status": "SECURED"
                 })
                 return
 
@@ -1303,7 +1303,7 @@ class SupportApiServer:
                         "sha256": f["sha256_hash"],
                         "mime": f.get("mime_type", "application/octet-stream"),
                         "created_at": f["created_at"],
-                        "vault_status": "VAULTED_FOR_BOT_TRIAGE_ONLY"
+                        "vault_status": "SECURED"
                     })
 
                 await self._send_response(writer, 200, {

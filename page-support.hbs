@@ -2126,43 +2126,9 @@ html.light-mode .gm-evidence-meta code {
     background: rgba(0, 0, 0, 0.06);
     color: #334155;
 }
-.gm-evidence-vault-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    font-size: 11px;
-    font-weight: 600;
-    color: #cbd5e1;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-html.light-mode .gm-evidence-vault-badge {
-    background: rgba(0, 0, 0, 0.04);
-    border-color: rgba(0, 0, 0, 0.1);
-    color: #475569;
-}
-.gm-vault-lock-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #10b981;
-    box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
-}
-
 @media (max-width: 600px) {
     .gm-evidence-card.gm-evidence-vaulted {
-        flex-direction: column;
-        align-items: flex-start;
         gap: 10px;
-    }
-    .gm-evidence-vault-badge {
-        width: 100%;
-        justify-content: center;
-        box-sizing: border-box;
     }
 }
 
@@ -2720,22 +2686,21 @@ html.light-mode .gm-evidence-vault-badge {
                 return `
                     <div class="gm-evidence-card gm-evidence-vaulted">
                         <div class="gm-evidence-vault-icon">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                                <line x1="16" y1="13" x2="8" y2="13"></line>
+                                <line x1="16" y1="17" x2="8" y2="17"></line>
+                                <polyline points="10 9 9 9 8 9"></polyline>
                             </svg>
                         </div>
                         <div class="gm-evidence-info">
                             <div class="gm-evidence-name">${escapeHtml(f.name)}</div>
-                            <div class="gm-evidence-meta">${sizeKb} KB | SHA-256: <code>${escapeHtml(f.sha256.substring(0, 16))}...</code></div>
-                        </div>
-                        <div class="gm-evidence-vault-badge" title="Evidence is secured in the isolated server vault and triaged solely through the operational Telegram Bot.">
-                            <span class="gm-vault-lock-dot"></span>
-                            <span>Sequestered in Vault // Bot Triage Only</span>
+                            <div class="gm-evidence-meta">${sizeKb} KB</div>
                         </div>
                     </div>
                 `;
-            }).join('');;
+            }).join('');
         } else {
             evSection.style.display = 'none';
         }
