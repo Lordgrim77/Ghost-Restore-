@@ -462,6 +462,18 @@ class SupportVault:
             "created_at": now
         }
 
+    def get_messages(self, case_code: str) -> List[Dict[str, Any]]:
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute("SELECT * FROM messages WHERE case_code = ? ORDER BY id ASC", (case_code,)).fetchall()
+                    if rows:
+                        return [dict(r) for r in rows]
+            except Exception:
+                pass
+        return []
+
     def list_recent_cases(self, limit: int = 15) -> List[Dict[str, Any]]:
         seen_codes = set()
         all_cases = []
@@ -504,49 +516,47 @@ class SupportBotBridge:
         # Handle admin text messages (both native replies and interactive conversation)
         self.app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_admin_message))
 
-    def make_case_keyboard(self, case_code: str, status: str) -> InlineKeyboardMarkup:
-        buttons = []
-        if status == "SUBMITTED":
-            buttons.append([
-                InlineKeyboardButton("🔍 In Review", callback_data=f"case_review:{case_code}"),
-                InlineKeyboardButton("📥 Evidence", callback_data=f"case_evidence:{case_code}")
-            ])
-            buttons.append([
-                InlineKeyboardButton("✅ Mark Closed", callback_data=f"case_close:{case_code}"),
-                InlineKeyboardButton("❌ Mark Rejected", callback_data=f"case_reject:{case_code}")
-            ])
-        elif status == "IN_REVIEW":
-            buttons.append([
-                InlineKeyboardButton("💬 Reply to Reporter", callback_data=f"case_reply:{case_code}"),
-                InlineKeyboardButton("📥 Evidence", callback_data=f"case_evidence:{case_code}")
-            ])
-            buttons.append([
-                InlineKeyboardButton("✅ Mark Closed", callback_data=f"case_close:{case_code}"),
-                InlineKeyboardButton("❌ Mark Rejected", callback_data=f"case_reject:{case_code}")
-            ])
-        else:
-            # Closed or Rejected: allow reopening or review
-            buttons.append([
-                InlineKeyboardButton("🔄 Re-Open / In Review", callback_data=f"case_review:{case_code}"),
-                InlineKeyboardButton("📥 Evidence", callback_data=f"case_evidence:{case_code}")
-            ])
-        buttons.append([
+    def make_case_keyboard(self, case_code: str, status: str, has_files: bool = False, msg_count: int = 0) -> InlineKeyboardMarkup:
+        # Row 1: Chat & History, and Evidence (if files exist)
+        row1 = [
+            InlineKeyboardButton(f"💬 Chat & History ({msg_count})", callback_data=f"case_thread:{case_code}")
+        ]
+        if has_files:
+            row1.append(InlineKeyboardButton("📎 Evidence", callback_data=f"case_evidence:{case_code}"))
+
+        # Row 2: Status Menu and Back button
+        row2 = [
+            InlineKeyboardButton("⚙️ Change Status", callback_data=f"case_status_menu:{case_code}"),
             InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list")
+        ]
+        return InlineKeyboardMarkup([row1, row2])
+
+    def make_status_menu_keyboard(self, case_code: str) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🟡 Set: In Progress", callback_data=f"case_set_status:{case_code}:IN_REVIEW"),
+                InlineKeyboardButton("🟢 Set: Resolved", callback_data=f"case_set_status:{case_code}:CLOSED")
+            ],
+            [
+                InlineKeyboardButton("⚪ Set: Closed / Dismissed", callback_data=f"case_set_status:{case_code}:REJECTED")
+            ],
+            [
+                InlineKeyboardButton("⬅️ Cancel / Back", callback_data=f"case_view:{case_code}")
+            ]
         ])
-        return InlineKeyboardMarkup(buttons)
 
     def format_case_card(self, case_data: Dict[str, Any]) -> str:
         priority_emojis = {
-            "CRITICAL": "🔴 CRITICAL",
-            "URGENT": "🟠 URGENT",
-            "STANDARD": "🟡 STANDARD",
-            "LOW": "⚪ LOW"
+            "CRITICAL": "🔴 Critical",
+            "URGENT": "🟠 Urgent",
+            "STANDARD": "🟡 Standard",
+            "LOW": "⚪ Low"
         }
         status_emojis = {
-            "SUBMITTED": "🟡 SUBMITTED (Pending Triage)",
-            "IN_REVIEW": "🟠 IN REVIEW (Investigator Assigned)",
-            "CLOSED": "🟢 CLOSED / RESOLVED",
-            "REJECTED": "⚪ REJECTED / DISMISSED"
+            "SUBMITTED": "🟡 New",
+            "IN_REVIEW": "🟠 In Progress",
+            "CLOSED": "🟢 Resolved",
+            "REJECTED": "⚪ Closed"
         }
 
         raw_priority = str(case_data.get('priority') or 'STANDARD').upper()
@@ -555,58 +565,102 @@ class SupportBotBridge:
         s_display = status_emojis.get(raw_status, raw_status)
 
         import html
-        files = case_data.get("files", [])
-        files_text = f"📁 <b>Evidence:</b> {len(files)} file(s) attached\n"
-        for f in files[:4]:
-            orig_name = html.escape(str(f.get('original_name') or 'evidence.bin'))
-            size_kb = (f.get('file_size') or 0) // 1024
-            sha_snip = html.escape(str(f.get('sha256_hash') or '')[:12])
-            files_text += f"   • <code>{orig_name}</code> ({size_kb} KB | SHA: <code>{sha_snip}...</code>)\n"
-        if len(files) > 4:
-            files_text += f"   <i>...and {len(files) - 4} more attachment(s)</i>\n"
-
-        category = html.escape(str(case_data.get('category') or 'Incident Report'))
+        category = html.escape(str(case_data.get('category') or 'Support'))
         subject = html.escape(str(case_data.get('subject') or 'No Subject'))
         desc = html.escape(str(case_data.get('description') or ''))[:600]
         reporter = html.escape(str(case_data.get('reporter_alias') or 'Anonymous'))
-        ip_hash = html.escape(str(case_data.get('ip_hash') or 'N/A')[:10])
-        created_at = str(case_data.get('created_at') or '')[:19].replace('T', ' ')
+        created_at = str(case_data.get('created_at') or '')[:16].replace('T', ' ')
 
-        member_line = ""
+        member_info = ""
         if case_data.get("member_email"):
             m_esc = html.escape(str(case_data["member_email"]))
-            member_line = f"👤 <b>Ghost Member:</b> <code>{m_esc}</code>\n"
+            member_info = f" (<code>{m_esc}</code>)"
+
+        files = case_data.get("files", [])
+        if files:
+            files_snippet = []
+            for f in files[:2]:
+                fn = html.escape(str(f.get('original_name') or 'file'))
+                sz = (f.get('file_size') or 0) // 1024
+                files_snippet.append(f"{fn} ({sz} KB)")
+            files_line = f"📎 <b>Attachments:</b> {len(files)} file(s) [{', '.join(files_snippet)}]\n"
+        else:
+            files_line = "📎 <b>Attachments:</b> None\n"
+
+        msgs = self.vault.get_messages(case_data.get("case_code", ""))
+        msg_count = len(msgs)
+        if msg_count > 0:
+            latest = msgs[-1]
+            last_sender = "You" if latest.get("sender_type") == "admin" else "Reporter"
+            last_time = str(latest.get("created_at") or "")[11:16]
+            msg_line = f"💬 <b>Conversation:</b> {msg_count} message(s) (Latest from {last_sender} at {last_time} UTC)\n"
+        else:
+            msg_line = "💬 <b>Conversation:</b> No messages exchanged yet\n"
 
         note_text = ""
         if case_data.get("resolution_note"):
             clean_note = html.escape(str(case_data['resolution_note']))
-            note_text = f"📋 <b>Determination Note:</b>\n<blockquote>{clean_note}</blockquote>\n"
+            note_text = f"📋 <b>Resolution Note:</b> {clean_note}\n"
 
         return (
-            f"🚨 <b>INCIDENT REPORT: #{case_data['case_code']}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📌 <b>Category:</b> {category}\n"
-            f"⚡ <b>Priority:</b> {p_display}\n"
-            f"🕒 <b>Submitted:</b> {created_at} UTC\n"
-            f"👤 <b>Reporter:</b> {reporter} [Hash: <code>{ip_hash}</code>]\n"
-            f"{member_line}"
-            f"{files_text}\n"
-            f"📝 <b>Subject:</b> {subject}\n"
-            f"📄 <b>Description:</b>\n"
+            f"🛡️ <b>Support Case #{case_data['case_code']}</b>\n"
+            f"Status: <b>{s_display}</b>  |  Priority: <b>{p_display}</b>\n"
+            f"Category: {category}  ·  Reporter: {reporter}{member_info}\n"
+            f"Submitted: {created_at} UTC\n\n"
+            f"📝 <b>{subject}</b>\n"
             f"<blockquote>{desc}</blockquote>\n"
+            f"{files_line}"
+            f"{msg_line}"
             f"{note_text}"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Status: <b>{s_display}</b>"
         )
 
+    def format_thread_view(self, case_code: str, case_data: Dict[str, Any], msgs: List[Dict[str, Any]]) -> Tuple[str, InlineKeyboardMarkup]:
+        import html
+        subject = html.escape(str(case_data.get('subject') or 'No Subject'))
+        raw_status = str(case_data.get('status') or 'SUBMITTED').upper()
+        status_tag = "🟡 New" if raw_status == "SUBMITTED" else ("🟠 In Progress" if raw_status == "IN_REVIEW" else "🟢 Resolved")
+
+        lines = [
+            f"💬 <b>Conversation Thread: #{case_code}</b>",
+            f"Subject: <b>{subject}</b>  ·  Status: <b>{status_tag}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ]
+
+        if not msgs:
+            lines.append("<i>No messages exchanged yet. Tap 'Send Reply' below to start the conversation with the reporter.</i>")
+        else:
+            for m in msgs[-10:]:
+                is_admin = m.get("sender_type") == "admin"
+                sender_label = "🛡️ Support Team" if is_admin else f"👤 Reporter ({html.escape(m.get('sender_name') or 'User')})"
+                time_str = str(m.get("created_at") or "")[11:16]
+                m_text = html.escape(m.get("message_text") or "")
+                lines.append(f"<b>{sender_label}</b>  ·  <i>{time_str} UTC</i>\n<blockquote>{m_text}</blockquote>")
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"<i>Total {len(msgs)} message(s) in case history.</i>")
+        text = "\n".join(lines)
+
+        buttons = [
+            [
+                InlineKeyboardButton("💬 Send Reply", callback_data=f"case_reply:{case_code}"),
+                InlineKeyboardButton("🔄 Refresh Thread", callback_data=f"case_thread:{case_code}")
+            ],
+            [
+                InlineKeyboardButton("⚙️ Change Status", callback_data=f"case_status_menu:{case_code}"),
+                InlineKeyboardButton("⬅️ Back to Case", callback_data=f"case_view:{case_code}")
+            ]
+        ]
+        return text, InlineKeyboardMarkup(buttons)
+
     async def notify_new_case(self, case_data: Dict[str, Any]):
-        """Send high-priority alert to the administrator."""
+        """Send streamlined alert to the administrator."""
         if not self.app or not self.admin_chat_id:
             logger.info("Standalone/No-admin mode: skipping Telegram case alert for %s", case_data.get("case_code"))
             return
 
         text = self.format_case_card(case_data)
-        kb = self.make_case_keyboard(case_data["case_code"], case_data["status"])
+        has_files = bool(case_data.get("files"))
+        kb = self.make_case_keyboard(case_data["case_code"], case_data["status"], has_files=has_files, msg_count=0)
         try:
             msg = await self.app.bot.send_message(
                 chat_id=self.admin_chat_id,
@@ -625,17 +679,23 @@ class SupportBotBridge:
             logger.info("Standalone/No-admin mode: skipping Telegram reporter reply alert for %s", case_code)
             return
 
+        import html
         text = (
-            f"💬 <b>[REPORTER REPLY] #{case_code}</b>\n"
+            f"💬 <b>New Message on Case #{case_code}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"<blockquote>{message_text}</blockquote>\n"
+            f"<blockquote>{html.escape(message_text)}</blockquote>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"<i>Tap below or reply to this message directly to respond.</i>"
+            f"<i>Reply directly to this notification, or tap below:</i>"
         )
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("💬 Reply Back", callback_data=f"case_reply:{case_code}"),
-            InlineKeyboardButton("🔍 View Case", callback_data=f"case_view:{case_code}")
-        ]])
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("💬 Send Reply", callback_data=f"case_reply:{case_code}"),
+                InlineKeyboardButton("📜 View Thread", callback_data=f"case_thread:{case_code}")
+            ],
+            [
+                InlineKeyboardButton("🔍 View Case", callback_data=f"case_view:{case_code}")
+            ]
+        ])
         try:
             msg = await self.app.bot.send_message(
                 chat_id=self.admin_chat_id,
@@ -673,58 +733,99 @@ class SupportBotBridge:
             admin_user = query.from_user.username or query.from_user.first_name or "Administrator"
 
             if action == "case_view":
+                msgs = self.vault.get_messages(case_code)
+                has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, case_data.get("status", "SUBMITTED"))
+                kb = self.make_case_keyboard(case_code, case_data.get("status", "SUBMITTED"), has_files=has_files, msg_count=len(msgs))
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         raise
 
+            elif action in ("case_thread", "case_history"):
+                msgs = self.vault.get_messages(case_code)
+                text, kb = self.format_thread_view(case_code, case_data, msgs)
+                try:
+                    await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        raise
+
+            elif action == "case_status_menu":
+                raw_st = str(case_data.get("status") or "SUBMITTED").upper()
+                st_name = "🟡 New" if raw_st == "SUBMITTED" else ("🟠 In Progress" if raw_st == "IN_REVIEW" else "🟢 Resolved")
+                text = (
+                    f"⚙️ <b>Change Status: #{html.escape(case_code)}</b>\n"
+                    f"Current Status: <b>{st_name}</b>\n\n"
+                    f"Choose an updated status for this case:"
+                )
+                kb = self.make_status_menu_keyboard(case_code)
+                try:
+                    await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        raise
+
+            elif action == "case_set_status":
+                # Format: case_set_status:<case_code>:<new_status>
+                parts = data.split(":")
+                new_st = parts[2] if len(parts) > 2 else "IN_REVIEW"
+                self.vault.update_status(case_code, new_st, actor=admin_user, note=f"Status set to {new_st} via Telegram.")
+                case_data = self.vault.get_case(case_code) or case_data
+                case_data["status"] = new_st
+                msgs = self.vault.get_messages(case_code)
+                has_files = bool(case_data.get("files"))
+                try:
+                    await query.answer(f"✓ Case #{case_code} set to {new_st}")
+                except Exception:
+                    pass
+                text = self.format_case_card(case_data)
+                kb = self.make_case_keyboard(case_code, new_st, has_files=has_files, msg_count=len(msgs))
+                try:
+                    await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        pass
+
             elif action == "case_review":
                 self.vault.update_status(case_code, "IN_REVIEW", actor=admin_user)
                 case_data["status"] = "IN_REVIEW"
+                msgs = self.vault.get_messages(case_code)
+                has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, "IN_REVIEW")
+                kb = self.make_case_keyboard(case_code, "IN_REVIEW", has_files=has_files, msg_count=len(msgs))
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         pass
-                await query.message.reply_text(
-                    f"🔍 Case <b>#{html.escape(case_code)}</b> marked as <b>IN REVIEW</b> by @{html.escape(admin_user)}.",
-                    parse_mode=ParseMode.HTML
-                )
 
             elif action == "case_close":
-                self.vault.update_status(case_code, "CLOSED", actor=admin_user, note="Resolved by investigation team.")
+                self.vault.update_status(case_code, "CLOSED", actor=admin_user, note="Resolved by support team.")
                 case_data["status"] = "CLOSED"
+                msgs = self.vault.get_messages(case_code)
+                has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, "CLOSED")
+                kb = self.make_case_keyboard(case_code, "CLOSED", has_files=has_files, msg_count=len(msgs))
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         pass
-                await query.message.reply_text(
-                    f"✅ Case <b>#{html.escape(case_code)}</b> has been marked as <b>CLOSED / RESOLVED</b>.",
-                    parse_mode=ParseMode.HTML
-                )
 
             elif action == "case_reject":
-                self.vault.update_status(case_code, "REJECTED", actor=admin_user, note="Dismissed or insufficient evidence.")
+                self.vault.update_status(case_code, "REJECTED", actor=admin_user, note="Dismissed or closed.")
                 case_data["status"] = "REJECTED"
+                msgs = self.vault.get_messages(case_code)
+                has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, "REJECTED")
+                kb = self.make_case_keyboard(case_code, "REJECTED", has_files=has_files, msg_count=len(msgs))
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         pass
-                await query.message.reply_text(
-                    f"❌ Case <b>#{html.escape(case_code)}</b> has been marked as <b>REJECTED / DISMISSED</b>.",
-                    parse_mode=ParseMode.HTML
-                )
 
             elif action == "case_evidence":
                 files = case_data.get("files", [])

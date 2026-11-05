@@ -380,7 +380,17 @@ window.GHOST_MEMBER = {
                                     <span class="gm-live-dot"></span>
                                     <span class="gm-chat-title">Case Communication Stream</span>
                                 </div>
-                                <span class="gm-chat-status" id="dashChatStatus">Live Channel with Investigators</span>
+                                <div style="display:flex;align-items:center;gap:10px;">
+                                    <button type="button" class="gm-chat-export-btn" onclick="exportChatTranscript()" title="Download conversation history transcript">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                        <span>Export</span>
+                                    </button>
+                                    <span class="gm-chat-status" id="dashChatStatus">Live Channel</span>
+                                </div>
                             </div>
 
                             <div class="gm-chat-messages" id="gmChatMessages">
@@ -1776,6 +1786,34 @@ html.light-mode .gm-chat-title {
     font-size: 12px;
     color: #8b949e;
 }
+.gm-chat-export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #94a3b8;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.gm-chat-export-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+html.light-mode .gm-chat-export-btn {
+    color: #475569;
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+html.light-mode .gm-chat-export-btn:hover {
+    color: #0f172a;
+    background: rgba(0, 0, 0, 0.08);
+}
 .gm-chat-messages {
     padding: 20px;
     min-height: 220px;
@@ -2709,29 +2747,79 @@ html.light-mode .gm-evidence-meta code {
         renderMessages(c.messages || []);
     }
 
+    let currentCaseMessages = [];
+
     function renderMessages(msgs) {
+        currentCaseMessages = msgs || [];
         const container = document.getElementById('gmChatMessages');
-        if (!msgs.length) {
+        if (!currentCaseMessages.length) {
             container.innerHTML = '<div class="gm-chat-empty">💬 No messages yet. You can submit updates or additional context below.</div>';
             return;
         }
 
-        container.innerHTML = msgs.map(m => {
+        container.innerHTML = currentCaseMessages.map(m => {
             const isReporter = m.sender_type === 'reporter';
             const cls = isReporter ? 'gm-msg-reporter' : 'gm-msg-admin';
-            const sender = isReporter ? 'You' : (m.sender_name || 'Investigator');
-            const timeStr = (m.created_at || '').substring(11, 16);
+            const sender = isReporter ? 'You' : (m.sender_name || 'Support Team');
+            let timeStr = '';
+            if (m.created_at) {
+                try {
+                    const d = new Date(m.created_at);
+                    timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                } catch(e) {
+                    timeStr = (m.created_at || '').substring(11, 16);
+                }
+            }
 
             return `
                 <div class="gm-msg-bubble ${cls}">
                     <div class="gm-msg-text">${escapeHtml(m.message || m.message_text || '')}</div>
-                    <div class="gm-msg-meta">${escapeHtml(sender)} · ${timeStr}</div>
+                    <div class="gm-msg-meta">${escapeHtml(sender)}${timeStr ? ' · ' + timeStr : ''}</div>
                 </div>
             `;
         }).join('');
 
         container.scrollTop = container.scrollHeight;
     }
+
+    window.exportChatTranscript = function() {
+        if (!currentCaseCode) {
+            alert('No active case loaded.');
+            return;
+        }
+        const subj = document.getElementById('dashSubject') ? document.getElementById('dashSubject').textContent.trim() : '';
+        const status = document.getElementById('dashStatusBadge') ? document.getElementById('dashStatusBadge').textContent.trim() : '';
+
+        let transcript = `====================================================\n`;
+        transcript += `CASE COMMUNICATION TRANSCRIPT\n`;
+        transcript += `Case Code: #${currentCaseCode}\n`;
+        transcript += `Subject:   ${subj}\n`;
+        transcript += `Status:    ${status}\n`;
+        transcript += `Exported:  ${new Date().toUTCString()}\n`;
+        transcript += `====================================================\n\n`;
+
+        if (!currentCaseMessages || !currentCaseMessages.length) {
+            transcript += `(No messages recorded in this conversation)\n`;
+        } else {
+            currentCaseMessages.forEach(m => {
+                const isReporter = m.sender_type === 'reporter';
+                const sender = isReporter ? 'Reporter (You)' : (m.sender_name || 'Support Team');
+                const time = m.created_at || '';
+                transcript += `[${time}] ${sender}:\n`;
+                transcript += `${m.message || m.message_text || ''}\n\n`;
+            });
+        }
+
+        const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `case-${currentCaseCode}-transcript.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
 
     async function pollCaseUpdates() {
         if (!currentCaseCode || !currentAccessKey) return;

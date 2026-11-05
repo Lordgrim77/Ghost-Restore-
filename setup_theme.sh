@@ -221,12 +221,14 @@ sudo mkdir -p "$GHOST_DIR/Ghost-Restore"
 sudo mkdir -p "$GHOST_DIR/support_vault/evidence"
 sudo chmod -R 775 "$GHOST_DIR/support_vault" 2>/dev/null || true
 
-# Always download latest support_hub.py to Ghost-Restore
+# Always download latest support_hub.py and bot.py to Ghost-Restore
 sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$GHOST_DIR/Ghost-Restore/support_hub.py"
+sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$GHOST_DIR/Ghost-Restore/bot.py" 2>/dev/null || true
 
 # If /opt/ghost-telegram-bot exists, update it there too
 if [ -d "/opt/ghost-telegram-bot" ]; then
     sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "/opt/ghost-telegram-bot/support_hub.py"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "/opt/ghost-telegram-bot/bot.py" 2>/dev/null || true
 fi
 
 # Detect service working directory and update there if different
@@ -235,6 +237,7 @@ if [ -f "$BOT_SVC_FILE" ]; then
     BOT_DIR=$(grep -E '^\s*WorkingDirectory\s*=' "$BOT_SVC_FILE" | head -n 1 | cut -d= -f2 | tr -d ' ' || echo "")
     if [ -n "$BOT_DIR" ] && [ -d "$BOT_DIR" ]; then
         sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$BOT_DIR/support_hub.py"
+        sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$BOT_DIR/bot.py" 2>/dev/null || true
     fi
     sudo systemctl daemon-reload
     sudo systemctl restart ghost-telegram-bot.service 2>/dev/null || true
