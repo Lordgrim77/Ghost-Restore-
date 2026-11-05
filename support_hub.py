@@ -20,6 +20,7 @@ import json
 import uuid
 import secrets
 import hashlib
+import hmac
 import sqlite3
 import datetime
 import struct
@@ -910,6 +911,110 @@ class SupportBotBridge:
 # Zero-Dependency Async HTTP API Server
 # =========================================================================
 
+
+# =========================================================================
+# Cryptographic Anti-Flooding Engine (Dynamic Puzzle + Proof-of-Work Challenge)
+# =========================================================================
+
+class CaptchaEngine:
+    """
+    Self-contained, privacy-preserving anti-flooding challenge engine:
+    1. Cryptographic HMAC signature ensuring tokens cannot be forged.
+    2. Dynamic math/visual challenge to defeat simple scripted bots.
+    3. Client-side SHA-256 Proof-of-Work (PoW) difficulty requiring computational work
+       before requests are admitted, neutralizing DDoS/flood scripts.
+    4. Anti-replay token tracking with memory-capped sliding expiration.
+    """
+    def __init__(self, secret_key: Optional[str] = None):
+        self.secret_key = secret_key or secrets.token_hex(32)
+        # Store spent or issued challenges: challenge_id -> expiry_timestamp
+        self.spent_tokens: Dict[str, float] = {}
+        self.difficulty = 4  # Requires hash beginning with '0000' (~0.05s-0.25s client-side)
+
+    def _cleanup_expired(self):
+        now = time.time()
+        expired = [cid for cid, exp in self.spent_tokens.items() if exp < now]
+        for cid in expired:
+            self.spent_tokens.pop(cid, None)
+
+    def generate_challenge(self) -> Dict[str, Any]:
+        self._cleanup_expired()
+        challenge_id = secrets.token_hex(16)
+        timestamp = int(time.time())
+
+        # Generate simple arithmetic challenge
+        num1 = secrets.randbelow(15) + 5
+        num2 = secrets.randbelow(10) + 2
+        op = secrets.choice(["+", "-"])
+        if op == "+":
+            ans = str(num1 + num2)
+            question = f"{num1} + {num2}"
+        else:
+            if num1 < num2:
+                num1, num2 = num2, num1
+            ans = str(num1 - num2)
+            question = f"{num1} - {num2}"
+
+        # Sign the challenge parameters: challenge_id, timestamp, ans, difficulty
+        sig_payload = f"{challenge_id}:{timestamp}:{ans}:{self.difficulty}"
+        signature = hmac.new(self.secret_key.encode('utf-8'), sig_payload.encode('utf-8'), hashlib.sha256).hexdigest()
+
+        # Dynamic SVG puzzle
+        svg_w, svg_h = 160, 44
+        svg_markup = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" style="user-select:none;border-radius:8px;">'
+            f'<rect width="100%" height="100%" fill="rgba(15,23,42,0.95)" rx="8" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>'
+            f'<path d="M 10 32 Q 40 8, 80 22 T 150 12" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>'
+            f'<path d="M 5 15 Q 50 35, 100 15 T 155 30" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>'
+            f'<text x="50%" y="28" font-family="monospace, monospace" font-size="19" font-weight="bold" fill="#ffffff" text-anchor="middle" letter-spacing="3">{question} = ?</text>'
+            f'</svg>'
+        )
+
+        return {
+            "challenge_id": challenge_id,
+            "timestamp": timestamp,
+            "signature": signature,
+            "difficulty": self.difficulty,
+            "svg": svg_markup
+        }
+
+    def verify_challenge(self, challenge_id: str, timestamp: int, signature: str, solution: str, nonce: str) -> bool:
+        self._cleanup_expired()
+        now = time.time()
+
+        # 1. Check expiration (5 minutes = 300s)
+        if abs(now - timestamp) > 300:
+            logger.warning("[CaptchaEngine] Challenge %s expired", challenge_id)
+            return False
+
+        # 2. Check replay prevention
+        if challenge_id in self.spent_tokens:
+            logger.warning("[CaptchaEngine] Replay attempt on challenge %s", challenge_id)
+            return False
+
+        # 3. Verify HMAC signature
+        expected_sig = hmac.new(
+            self.secret_key.encode('utf-8'),
+            f"{challenge_id}:{timestamp}:{solution.strip()}:{self.difficulty}".encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected_sig):
+            logger.warning("[CaptchaEngine] Invalid signature or wrong solution for %s", challenge_id)
+            return False
+
+        # 4. Verify Proof-of-Work (PoW) computation
+        target_prefix = "0" * self.difficulty
+        pow_hash = hashlib.sha256(f"{challenge_id}:{nonce}".encode('utf-8')).hexdigest()
+        if not pow_hash.startswith(target_prefix):
+            logger.warning("[CaptchaEngine] Invalid PoW hash %s for %s", pow_hash, challenge_id)
+            return False
+
+        # Mark token as spent until nominal expiry
+        self.spent_tokens[challenge_id] = float(timestamp + 300)
+        return True
+
+
 class SupportApiServer:
     def __init__(self, vault: SupportVault, bridge: SupportBotBridge, host: str = "127.0.0.1", port: int = 8080):
         self.vault = vault
@@ -917,6 +1022,7 @@ class SupportApiServer:
         self.host = host
         self.port = port
         self.server: Optional[asyncio.Server] = None
+        self.captcha = CaptchaEngine()
         # IP Rate Limiting (in-memory sliding window): ip -> [timestamp, timestamp]
         self.ip_submissions: Dict[str, List[float]] = {}
 
@@ -1022,6 +1128,14 @@ class SupportApiServer:
                 return
 
             # -------------------------------------------------------------
+            # GET /captcha (Obtain Cryptographic Security Challenge)
+            # -------------------------------------------------------------
+            elif method == "GET" and route_path == "/captcha":
+                challenge = self.captcha.generate_challenge()
+                await self._send_response(writer, 200, challenge)
+                return
+
+            # -------------------------------------------------------------
             # POST /cases (Case Submission - JSON or Multipart)
             # -------------------------------------------------------------
             elif method == "POST" and route_path == "/cases":
@@ -1064,6 +1178,21 @@ class SupportApiServer:
                     except Exception:
                         await self._send_response(writer, 400, {"error": "Unsupported Content-Type. Please use application/json or multipart/form-data."})
                         return
+
+                # Verify Security Challenge / Anti-Flooding Captcha + PoW
+                c_id = params.get("captcha_id", "").strip()
+                c_ts = int(params.get("captcha_timestamp", 0) or 0)
+                c_sig = params.get("captcha_signature", "").strip()
+                c_sol = params.get("captcha_solution", "").strip()
+                c_nonce = params.get("captcha_nonce", "").strip()
+
+                if not c_id or not c_sig or not c_sol or not c_nonce:
+                    await self._send_response(writer, 400, {"error": "Anti-flooding security challenge is required. Please solve the verification puzzle."})
+                    return
+
+                if not self.captcha.verify_challenge(c_id, c_ts, c_sig, c_sol, c_nonce):
+                    await self._send_response(writer, 403, {"error": "Security verification failed or expired. Please solve the updated puzzle."})
+                    return
 
                 subject = params.get("subject", "").strip()
                 description = params.get("description", "").strip()
@@ -1130,71 +1259,18 @@ class SupportApiServer:
                 return
 
             # -------------------------------------------------------------
-            # GET /cases/<case_code>/evidence/<file_id> (Stream Evidence File)
+            # GET /cases/<case_code>/evidence/<file_id> (Stream Evidence File - RESTRICTED TO BOT)
             # -------------------------------------------------------------
             elif method == "GET" and "/evidence/" in route_path and route_path.startswith("/cases/"):
-                parts = [p for p in route_path.split("/") if p]
-                if len(parts) < 4:
-                    await self._send_response(writer, 400, {"error": "Invalid evidence endpoint format."})
-                    return
-                case_code = parts[1]
-                file_id_str = parts[3]
-                access_key = query.get("key", "").strip()
-
-                case_data = self.vault.get_case(case_code)
-                if not case_data:
-                    await self._send_response(writer, 404, {"error": "Case not found."})
-                    return
-
-                if not access_key or case_data["access_key"] != access_key:
-                    await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
-                    return
-
-                # Locate file
-                target_file = None
-                for f in case_data.get("files", []):
-                    if str(f["id"]) == file_id_str or f["stored_filename"] == file_id_str:
-                        target_file = f
-                        break
-
-                if not target_file:
-                    await self._send_response(writer, 404, {"error": "Evidence attachment not found on case."})
-                    return
-
-                stored_path = self.vault.get_evidence_path(target_file["stored_filename"])
-                if not stored_path or not os.path.exists(stored_path):
-                    await self._send_response(writer, 404, {"error": "Evidence file is missing on server storage."})
-                    return
-
-                try:
-                    with open(stored_path, "rb") as fp:
-                        file_bytes = fp.read()
-                except Exception as e:
-                    logger.error("Failed to read evidence file: %s", e)
-                    await self._send_response(writer, 500, {"error": "Failed to read evidence file from storage."})
-                    return
-
-                mime = target_file.get("mime_type") or "application/octet-stream"
-                orig_name = target_file.get("original_name") or "evidence.bin"
-                encoded_name = urllib.parse.quote(orig_name)
-
-                # Set inline for previewable media, attachment for binaries
-                disp = "inline" if any(mime.startswith(t) for t in ("image/", "text/", "video/")) or mime == "application/pdf" else "attachment"
-
-                header_lines = [
-                    "HTTP/1.1 200 OK",
-                    f"Content-Type: {mime}",
-                    f"Content-Disposition: {disp}; filename=\"{orig_name}\"; filename*=UTF-8''{encoded_name}",
-                    f"Content-Length: {len(file_bytes)}",
-                    "Access-Control-Allow-Origin: *",
-                    "Access-Control-Allow-Methods: GET, OPTIONS",
-                    "Cache-Control: private, max-age=86400",
-                    "Connection: close",
-                    "",
-                    ""
-                ]
-                writer.write("\r\n".join(header_lines).encode('utf-8') + file_bytes)
-                await writer.drain()
+                # Strict OpSec & Chain-of-Custody: Direct web browser viewing/downloading is disabled.
+                # Evidence files are permanently sequestered in the offline vault and accessible solely
+                # by verified administrators through the dedicated operational Telegram Bot.
+                await self._send_response(writer, 403, {
+                    "error": "Direct web access to uploaded evidence is disabled for operational security. "
+                             "Evidence files are sequestered in an isolated vault and accessible exclusively "
+                             "by duty investigators via the verified operational Telegram Bot.",
+                    "vault_status": "VAULTED_FOR_BOT_TRIAGE_ONLY"
+                })
                 return
 
             # -------------------------------------------------------------
@@ -1217,7 +1293,7 @@ class SupportApiServer:
                     await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
                     return
 
-                # Strip internal server path before sending to client
+                # Strip internal server path and mark evidence as bot-vaulted only
                 safe_files = []
                 for f in case_data.get("files", []):
                     safe_files.append({
@@ -1226,7 +1302,8 @@ class SupportApiServer:
                         "size": f["file_size"],
                         "sha256": f["sha256_hash"],
                         "mime": f.get("mime_type", "application/octet-stream"),
-                        "created_at": f["created_at"]
+                        "created_at": f["created_at"],
+                        "vault_status": "VAULTED_FOR_BOT_TRIAGE_ONLY"
                     })
 
                 await self._send_response(writer, 200, {
