@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Support & Evidence Portal Management Hub
 Integrated with Telegram Bot for 1-Click Status Triage & Two-Way Case Chat.
@@ -28,24 +29,41 @@ import asyncio
 import logging
 import urllib.parse
 import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from email import policy
 from email.parser import BytesParser
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    MessageHandler,
-    CommandHandler,
-    ContextTypes,
-    filters,
-)
+try:
+    from telegram import (
+        Update,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+    )
+    from telegram.constants import ParseMode
+    from telegram.ext import (
+        Application,
+        CallbackQueryHandler,
+        MessageHandler,
+        CommandHandler,
+        ContextTypes,
+        filters,
+    )
+    HAS_TELEGRAM = True
+except (ImportError, ModuleNotFoundError):
+    HAS_TELEGRAM = False
+    Update = Any  # type: ignore
+    InlineKeyboardButton = Any  # type: ignore
+    InlineKeyboardMarkup = Any  # type: ignore
+    class ParseMode:  # type: ignore
+        HTML = "HTML"
+        MARKDOWN = "Markdown"
+        MARKDOWN_V2 = "MarkdownV2"
+    Application = Any  # type: ignore
+    CallbackQueryHandler = Any  # type: ignore
+    MessageHandler = Any  # type: ignore
+    CommandHandler = Any  # type: ignore
+    ContextTypes = Any  # type: ignore
+    filters = Any  # type: ignore
 
 logger = logging.getLogger("support-hub")
 
@@ -506,17 +524,24 @@ class SupportBotBridge:
         self.active_reply_sessions: Dict[int, str] = {}
         # In-memory mapping of telegram message_id -> case_code
         self.msg_to_case: Dict[int, str] = {}
-        if self.app:
+        if self.app and HAS_TELEGRAM:
             self._register_handlers()
 
     def _register_handlers(self):
-        self.app.add_handler(CallbackQueryHandler(self.handle_callback, pattern=r"^case_"))
-        self.app.add_handler(CommandHandler("cases", self.cases_command))
-        self.app.add_handler(CommandHandler("cancel", self.cancel_command))
-        # Handle admin text messages (both native replies and interactive conversation)
-        self.app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_admin_message))
+        if not HAS_TELEGRAM or not self.app:
+            return
+        try:
+            self.app.add_handler(CallbackQueryHandler(self.handle_callback, pattern=r"^case_"))
+            self.app.add_handler(CommandHandler("cases", self.cases_command))
+            self.app.add_handler(CommandHandler("cancel", self.cancel_command))
+            # Handle admin text messages (both native replies and interactive conversation)
+            self.app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_admin_message))
+        except Exception as e:
+            logger.warning("Could not register handlers on bot app (may already be registered in main): %s", e)
 
-    def make_case_keyboard(self, case_code: str, status: str, has_files: bool = False, msg_count: int = 0) -> InlineKeyboardMarkup:
+    def make_case_keyboard(self, case_code: str, status: str, has_files: bool = False, msg_count: int = 0) -> Any:
+        if not HAS_TELEGRAM:
+            return None
         # Row 1: Chat & History, and Evidence (if files exist)
         row1 = [
             InlineKeyboardButton(f"💬 Chat & History ({msg_count})", callback_data=f"case_thread:{case_code}")
@@ -531,7 +556,9 @@ class SupportBotBridge:
         ]
         return InlineKeyboardMarkup([row1, row2])
 
-    def make_status_menu_keyboard(self, case_code: str) -> InlineKeyboardMarkup:
+    def make_status_menu_keyboard(self, case_code: str) -> Any:
+        if not HAS_TELEGRAM:
+            return None
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("🟡 Set: In Progress", callback_data=f"case_set_status:{case_code}:IN_REVIEW"),
@@ -650,7 +677,8 @@ class SupportBotBridge:
                 InlineKeyboardButton("⬅️ Back to Case", callback_data=f"case_view:{case_code}")
             ]
         ]
-        return text, InlineKeyboardMarkup(buttons)
+        kb = InlineKeyboardMarkup(buttons) if HAS_TELEGRAM else None
+        return text, kb
 
     async def notify_new_case(self, case_data: Dict[str, Any]):
         """Send streamlined alert to the administrator."""

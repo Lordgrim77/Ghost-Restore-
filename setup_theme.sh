@@ -221,31 +221,46 @@ sudo mkdir -p "$GHOST_DIR/Ghost-Restore"
 sudo mkdir -p "$GHOST_DIR/support_vault/evidence"
 sudo chmod -R 775 "$GHOST_DIR/support_vault" 2>/dev/null || true
 
-# Always download latest support_hub.py and bot.py to Ghost-Restore
-sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$GHOST_DIR/Ghost-Restore/support_hub.py"
-sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$GHOST_DIR/Ghost-Restore/bot.py" 2>/dev/null || true
-
-# If /opt/ghost-telegram-bot exists, update it there too
+# Target directories to sync backend files
+SYNC_DIRS=("$GHOST_DIR/Ghost-Restore")
 if [ -d "/opt/ghost-telegram-bot" ]; then
-    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "/opt/ghost-telegram-bot/support_hub.py"
-    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "/opt/ghost-telegram-bot/bot.py" 2>/dev/null || true
+    SYNC_DIRS+=("/opt/ghost-telegram-bot")
 fi
 
-# Detect service working directory and update there if different
 BOT_SVC_FILE="/etc/systemd/system/ghost-telegram-bot.service"
 if [ -f "$BOT_SVC_FILE" ]; then
-    BOT_DIR=$(grep -E '^\s*WorkingDirectory\s*=' "$BOT_SVC_FILE" | head -n 1 | cut -d= -f2 | tr -d ' ' || echo "")
-    if [ -n "$BOT_DIR" ] && [ -d "$BOT_DIR" ]; then
-        sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$BOT_DIR/support_hub.py"
-        sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$BOT_DIR/bot.py" 2>/dev/null || true
+    SVC_DIR=$(grep -E '^\s*WorkingDirectory\s*=' "$BOT_SVC_FILE" | head -n 1 | cut -d= -f2 | tr -d ' ' || echo "")
+    if [ -n "$SVC_DIR" ] && [ -d "$SVC_DIR" ]; then
+        if [[ ! " ${SYNC_DIRS[@]} " =~ " ${SVC_DIR} " ]]; then
+            SYNC_DIRS+=("$SVC_DIR")
+        fi
     fi
-    sudo systemctl daemon-reload
+fi
+
+# Download all required daemon files across target directories
+for sdir in "${SYNC_DIRS[@]}"; do
+    sudo mkdir -p "$sdir"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$sdir/support_hub.py"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$sdir/bot.py"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/ghost_manager.py?v=$CACHE_BUSTER" -o "$sdir/ghost_manager.py"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/requirements.txt?v=$CACHE_BUSTER" -o "$sdir/requirements.txt"
+    # If a venv exists, ensure pip dependencies are satisfied
+    if [ -x "$sdir/venv/bin/pip" ]; then
+        sudo "$sdir/venv/bin/pip" install -r "$sdir/requirements.txt" -q 2>/dev/null || true
+    fi
+done
+
+# Restart the appropriate service cleanly, preventing port 8080 collision
+sudo systemctl daemon-reload
+if [ -f "$BOT_SVC_FILE" ]; then
+    # Disable and stop standalone service if active to avoid port 8080 collision
+    sudo systemctl stop ghost-support.service 2>/dev/null || true
+    sudo systemctl disable ghost-support.service 2>/dev/null || true
     sudo systemctl restart ghost-telegram-bot.service 2>/dev/null || true
-    echo -e "  ✓ Updated support_hub.py & restarted ghost-telegram-bot.service"
+    echo -e "  ✓ Synced backend files & restarted ghost-telegram-bot.service"
 elif [ -f "/etc/systemd/system/ghost-support.service" ]; then
-    sudo systemctl daemon-reload
     sudo systemctl restart ghost-support.service 2>/dev/null || true
-    echo -e "  ✓ Updated support_hub.py & restarted ghost-support.service"
+    echo -e "  ✓ Synced backend files & restarted ghost-support.service"
 else
     # Automatically install and enable standalone ghost-support daemon so API on port 8080 is always active
     cat <<EOF | sudo tee /etc/systemd/system/ghost-support.service >/dev/null
@@ -271,12 +286,21 @@ EOF
 fi
 
 # Verification of /captcha endpoint
-sleep 1
+sleep 2
 CAPTCHA_CHECK=$(curl -s -m 5 http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
 if [[ "$CAPTCHA_CHECK" =~ "challenge_id" ]]; then
     echo -e "  ✓ Cryptographic Challenge Engine verified: ${GREEN}ONLINE (HTTP 200)${NC}"
 else
-    echo -e "  ⚠️ Daemon verification status: $CAPTCHA_CHECK"
+    echo -e "  ${RED}⚠️ Daemon verification failed on port 8080!${NC}"
+    echo -e "  Output received: $CAPTCHA_CHECK"
+    echo -e "${YELLOW}--- Diagnostics (Service Logs) ---${NC}"
+    if [ -f "$BOT_SVC_FILE" ]; then
+        sudo journalctl -u ghost-telegram-bot -n 15 --no-pager 2>/dev/null || true
+    fi
+    if [ -f "/etc/systemd/system/ghost-support.service" ]; then
+        sudo journalctl -u ghost-support -n 15 --no-pager 2>/dev/null || true
+    fi
+    echo -e "${YELLOW}----------------------------------${NC}"
 fi
 
 # 8. Restart Ghost and clear template cache

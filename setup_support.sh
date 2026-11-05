@@ -128,6 +128,8 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+systemctl stop ghost-support.service 2>/dev/null || true
+systemctl disable ghost-support.service 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable ghost-telegram-bot.service -q
 systemctl restart ghost-telegram-bot.service

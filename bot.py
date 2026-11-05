@@ -1,3 +1,4 @@
+from __future__ import annotations
 #!/usr/bin/env python3
 """
 Ghost Telegram Bot
@@ -13,24 +14,62 @@ import logging
 import asyncio
 import datetime
 import urllib.request
+from typing import Optional, Dict, Any, List
 from pathlib import Path
-from dotenv import load_dotenv
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+# Safe environment loading (falls back to pure Python if python-dotenv is missing)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except (ImportError, ModuleNotFoundError):
+    def _fallback_load_dotenv(path: str = ".env"):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+    _fallback_load_dotenv()
+    _fallback_load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+# Safe telegram imports (falls back gracefully if python-telegram-bot is missing)
+try:
+    from telegram import (
+        Update,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+    )
+    from telegram.constants import ParseMode
+    from telegram.ext import (
+        Application,
+        ApplicationBuilder,
+        CommandHandler,
+        CallbackQueryHandler,
+        MessageHandler,
+        ContextTypes,
+        filters,
+    )
+    HAS_TELEGRAM = True
+except (ImportError, ModuleNotFoundError):
+    HAS_TELEGRAM = False
+    Update = Any  # type: ignore
+    InlineKeyboardButton = Any  # type: ignore
+    InlineKeyboardMarkup = Any  # type: ignore
+    class ParseMode:  # type: ignore
+        HTML = "HTML"
+        MARKDOWN = "Markdown"
+        MARKDOWN_V2 = "MarkdownV2"
+    Application = Any  # type: ignore
+    ApplicationBuilder = Any  # type: ignore
+    CommandHandler = Any  # type: ignore
+    CallbackQueryHandler = Any  # type: ignore
+    MessageHandler = Any  # type: ignore
+    ContextTypes = Any  # type: ignore
+    filters = Any  # type: ignore
 
 from ghost_manager import GhostManager
 from support_hub import init_support_hub, SupportApiServer
@@ -41,9 +80,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger("ghost-bot")
-
-# Load environment configuration
-load_dotenv()
 
 
 def _parse_int(val, default=0) -> int:
@@ -889,15 +925,22 @@ async def post_shutdown(application: Application):
 
 def main():
     """Start the Telegram bot application, or fallback to standalone Support API server."""
-    if not BOT_TOKEN or BOT_TOKEN == "your_bot_token_here":
+    if not HAS_TELEGRAM or not BOT_TOKEN or BOT_TOKEN == "your_bot_token_here":
         print("==================================================")
-        print(" [WARNING] TELEGRAM_BOT_TOKEN not configured in .env")
-        print(" Starting Support REST API server in fallback mode")
+        if not HAS_TELEGRAM:
+            print(" [INFO] python-telegram-bot is not installed.")
+            print(" Running Support REST API daemon in standalone mode.")
+        else:
+            print(" [WARNING] TELEGRAM_BOT_TOKEN not configured in .env")
+            print(" Starting Support REST API server in fallback mode.")
         print("==================================================")
         print(f"Ghost Directory:     {GHOST_DIR}")
         print(f"Backups Directory:   {BACKUPS_DIR}")
         print(f"Support REST API:    http://{SUPPORT_HOST}:{SUPPORT_PORT}")
-        print("(Add your bot token to .env to enable Telegram bot polling)")
+        if HAS_TELEGRAM:
+            print("(Add your bot token to .env to enable Telegram bot polling)")
+        else:
+            print("(Install python-telegram-bot in virtualenv to enable Telegram bot polling)")
         print("--------------------------------------------------")
 
         server = init_support_hub(
