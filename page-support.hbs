@@ -2044,6 +2044,7 @@ html.light-mode .gm-captcha-subtitle {
     height: 44px;
     background: rgba(15, 23, 42, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.12);
+    box-sizing: border-box;
 }
 html.light-mode .gm-captcha-visual {
     background: #0f172a;
@@ -2057,6 +2058,14 @@ html.light-mode .gm-captcha-visual {
     font-size: 11px;
     color: #94a3b8;
     padding: 0 10px;
+    text-align: center;
+    line-height: 1.3;
+}
+.gm-captcha-error {
+    color: #f87171;
+}
+html.light-mode .gm-captcha-error {
+    color: #ef4444;
 }
 .gm-captcha-refresh-btn {
     display: inline-flex;
@@ -2234,27 +2243,75 @@ html.light-mode .gm-evidence-vault-badge {
     // Cryptographic Anti-Flooding Challenge & PoW Engine
     // =============================================================
     let activeCaptcha = null;
+    let isFetchingCaptcha = false;
 
     async function fetchCaptcha() {
+        if (isFetchingCaptcha) return;
         const visual = document.getElementById('gmCaptchaVisual');
         if (!visual) return;
-        visual.innerHTML = '<span class="gm-captcha-loading">Loading security challenge...</span>';
-        try {
-            const res = await fetch(`${API_BASE}/captcha`);
-            if (!res.ok) throw new Error('Challenge unavailable');
-            activeCaptcha = await res.json();
-            visual.innerHTML = activeCaptcha.svg;
-            document.getElementById('gmCaptchaId').value = activeCaptcha.challenge_id;
-            document.getElementById('gmCaptchaTimestamp').value = activeCaptcha.timestamp;
-            document.getElementById('gmCaptchaSignature').value = activeCaptcha.signature;
+        isFetchingCaptcha = true;
+        visual.innerHTML = '<span class="gm-captcha-loading">Loading challenge...</span>';
+
+        const candidateBases = [
+            API_BASE,
+            '/api/support',
+            (window.location.origin ? `${window.location.origin}/api/support` : '')
+        ];
+        const uniqueBases = Array.from(new Set(candidateBases.filter(Boolean)));
+        let fetchedData = null;
+        let lastError = null;
+
+        for (const base of uniqueBases) {
+            try {
+                const cleanBase = base.replace(/\/+$/, '');
+                const url = `${cleanBase}/captcha?_t=${Date.now()}`;
+                const res = await fetch(url, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    cache: 'no-store'
+                });
+                if (res.ok) {
+                    fetchedData = await res.json();
+                    if (fetchedData && fetchedData.svg && fetchedData.challenge_id) {
+                        break;
+                    }
+                } else {
+                    lastError = new Error(`HTTP ${res.status}`);
+                }
+            } catch(err) {
+                lastError = err;
+            }
+        }
+
+        isFetchingCaptcha = false;
+
+        if (fetchedData && fetchedData.svg) {
+            activeCaptcha = fetchedData;
+            visual.innerHTML = fetchedData.svg;
+            const cid = document.getElementById('gmCaptchaId');
+            const cts = document.getElementById('gmCaptchaTimestamp');
+            const csig = document.getElementById('gmCaptchaSignature');
+            const cnon = document.getElementById('gmCaptchaNonce');
+            const csol = document.getElementById('gmCaptchaSolution');
             const input = document.getElementById('gmCaptchaInput');
-            if (input) input.value = '';
-        } catch(e) {
-            visual.innerHTML = '<span class="gm-captcha-error">Failed to load challenge. Tap refresh.</span>';
+
+            if (cid) cid.value = fetchedData.challenge_id;
+            if (cts) cts.value = fetchedData.timestamp;
+            if (csig) csig.value = fetchedData.signature;
+            if (cnon) cnon.value = '';
+            if (csol) csol.value = '';
+            if (input) {
+                input.value = '';
+                input.disabled = false;
+            }
+        } else {
+            console.error('[Support Hub] Failed to fetch captcha challenge:', lastError);
+            visual.innerHTML = '<span class="gm-captcha-error">Failed to load challenge. <a href="javascript:void(0)" onclick="fetchCaptcha()" style="color:inherit;text-decoration:underline;margin-left:4px;">Tap refresh</a></span>';
         }
     }
 
     window.refreshCaptcha = function() {
+        activeCaptcha = null;
         fetchCaptcha();
     };
 

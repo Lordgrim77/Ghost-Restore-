@@ -218,20 +218,27 @@ echo -e "${CYAN}================================================================
 sleep 2
 HEALTH_LOCAL=$(curl -s http://127.0.0.1:8080/health 2>/dev/null || echo "")
 if [[ "$HEALTH_LOCAL" =~ "support-hub" ]]; then
-  echo -e "  [1/2] Local Support Daemon (port 8080):  ${GREEN}ONLINE & LISTENING [OK]${NC}"
+  echo -e "  [1/3] Local Support Daemon (port 8080):  ${GREEN}ONLINE & LISTENING [OK]${NC}"
 else
-  echo -e "  [1/2] Local Support Daemon (port 8080):  ${RED}NOT RESPONDING [FAIL]${NC}"
+  echo -e "  [1/3] Local Support Daemon (port 8080):  ${RED}NOT RESPONDING [FAIL]${NC}"
   echo ""
   echo -e "${YELLOW}--- Recent ghost-telegram-bot Service Logs ---${NC}"
   journalctl -u ghost-telegram-bot -n 15 --no-pager
   echo -e "${YELLOW}----------------------------------------------${NC}"
 fi
 
+CAPTCHA_LOCAL=$(curl -s http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
+if [[ "$CAPTCHA_LOCAL" =~ "challenge_id" ]]; then
+  echo -e "  [2/3] Anti-Flooding Challenge Engine:    ${GREEN}ONLINE & VERIFIED [OK]${NC}"
+else
+  echo -e "  [2/3] Anti-Flooding Challenge Engine:    ${RED}NOT RESPONDING [FAIL]${NC}"
+fi
+
 HEALTH_PROXY=$(curl -s http://127.0.0.1/api/support/health 2>/dev/null || echo "")
 if [[ "$HEALTH_PROXY" =~ "support-hub" ]]; then
-  echo -e "  [2/2] Nginx Reverse Proxy (/api/support/): ${GREEN}CONNECTED & WORKING [OK]${NC}"
+  echo -e "  [3/3] Nginx Reverse Proxy (/api/support/): ${GREEN}CONNECTED & WORKING [OK]${NC}"
 else
-  echo -e "  [2/2] Nginx Reverse Proxy (/api/support/): ${GREEN}READY (Live over domain SSL) [OK]${NC}"
+  echo -e "  [3/3] Nginx Reverse Proxy (/api/support/): ${GREEN}READY (Live over domain SSL) [OK]${NC}"
 fi
 
 echo ""

@@ -1436,6 +1436,9 @@ class SupportApiServer:
         header_lines = [
             f"HTTP/1.1 {status_code} {status_msg}",
             "Content-Type: application/json; charset=utf-8",
+            "Cache-Control: no-cache, no-store, must-revalidate",
+            "Pragma: no-cache",
+            "Expires: 0",
             "Access-Control-Allow-Origin: *",
             "Access-Control-Allow-Methods: GET, POST, OPTIONS",
             "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Forwarded-For",
