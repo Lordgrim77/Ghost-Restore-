@@ -14,6 +14,7 @@ import logging
 import asyncio
 import datetime
 import urllib.request
+import re
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
@@ -134,6 +135,40 @@ def find_backup_file(file_name: str) -> str:
     return None
 
 
+def _update_env_file(key_values: dict, env_path: str = None):
+    """Safely updates or appends key-value pairs in .env."""
+    if not env_path:
+        env_path = os.path.join(os.path.dirname(__file__), ".env")
+        if not os.path.exists(env_path) and os.path.exists(".env"):
+            env_path = ".env"
+
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+    updated_keys = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k = stripped.split("=", 1)[0].strip()
+            if k in key_values:
+                new_lines.append(f"{k}={key_values[k]}\n")
+                updated_keys.add(k)
+                continue
+        new_lines.append(line)
+
+    for k, v in key_values.items():
+        if k not in updated_keys:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines.append("\n")
+            new_lines.append(f"{k}={v}\n")
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+
 def get_main_menu_keyboard():
     """Build the main interactive inline keyboard."""
     keyboard = [
@@ -142,14 +177,15 @@ def get_main_menu_keyboard():
             InlineKeyboardButton("♻️ Restore Backup", callback_data="menu_restore_list"),
         ],
         [
+            InlineKeyboardButton("🐙 GitHub Sync (Private)", callback_data="menu_github"),
             InlineKeyboardButton("📊 Ghost Status", callback_data="menu_status"),
-            InlineKeyboardButton("📑 List Backups", callback_data="menu_backups_list"),
         ],
         [
             InlineKeyboardButton("🛡️ Support Cases", callback_data="menu_cases_list"),
-            InlineKeyboardButton("🔄 Restart Ghost", callback_data="menu_restart_confirm"),
+            InlineKeyboardButton("📑 List Backups", callback_data="menu_backups_list"),
         ],
         [
+            InlineKeyboardButton("🔄 Restart Ghost", callback_data="menu_restart_confirm"),
             InlineKeyboardButton("ℹ️ Help & Info", callback_data="menu_help"),
         ],
     ]
@@ -621,7 +657,220 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.MARKDOWN
             )
 
-    # 10. HELP & INFO
+    # 10. GITHUB PRIVATE SYNC HUB
+    elif data == "menu_github":
+        gh_status = ghost_mgr.get_github_status()
+        is_cfg = gh_status.get("configured", False)
+        state_tag = "🟢 Configured" if is_cfg else "⚠️ Not Configured"
+
+        text = (
+            "🐙 *GitHub Sync Hub (Private Repository)*\n\n"
+            "Keep an unzipped, human-readable archive of your publication on a private GitHub repository:\n"
+            "• 📝 Individual JSON for each post & page (`posts/*.json`, `pages/*.json`)\n"
+            "• 🖼️ Unzipped media images preserving folder layout\n"
+            "• 💾 Complete database backup (`database/ghost_database.sql`)\n"
+            "• 🎨 Custom themes and route definitions\n"
+            "• 🔒 *Strict Privacy:* Incident support vault & evidence files are NEVER synced.\n\n"
+            f"• *Status:* {state_tag}\n"
+            f"• *Repository:* `{gh_status.get('repo', 'N/A')}`\n"
+            f"• *Branch:* `{gh_status.get('branch', 'main')}`\n"
+            f"• *Token:* `{gh_status.get('token_status', 'Not Set')}`\n"
+            f"• *Last Commit:* `{gh_status.get('last_commit', 'No sync recorded yet')}`\n"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton("📤 Backup to GitHub Now", callback_data="gh_backup_now"),
+                InlineKeyboardButton("📥 Restore from GitHub", callback_data="gh_restore_ask"),
+            ],
+            [
+                InlineKeyboardButton("⚙️ Setup Instructions", callback_data="gh_setup_info"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="menu_github"),
+            ],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    # 11. GITHUB BACKUP EXECUTE
+    elif data == "gh_backup_now":
+        gh_status = ghost_mgr.get_github_status()
+        if not gh_status["configured"]:
+            text = (
+                "⚠️ *GitHub Sync Not Configured*\n\n"
+                "Please configure your private GitHub repository and token first:\n\n"
+                "`/github_setup <repo_url> <token> [branch]`\n\n"
+                "*Example:*\n"
+                "`/github_setup https://github.com/Lordgrim77/my-backup.git ghp_xxxx main`"
+            )
+            keyboard = [
+                [InlineKeyboardButton("⚙️ Setup Guide", callback_data="gh_setup_info")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="menu_github")]
+            ]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+            return
+
+        await query.edit_message_text(
+            "⏳ *Starting GitHub Backup Process...*\n\n"
+            "Please wait while Ghost exports unzipped posts, pages, images, and database...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        loop = asyncio.get_running_loop()
+        last_reported = ""
+
+        def progress_cb(msg: str):
+            nonlocal last_reported
+            if msg == last_reported:
+                return
+            last_reported = msg
+            async def do_edit():
+                try:
+                    await query.edit_message_text(
+                        f"⏳ *Ghost GitHub Backup in progress...*\n\n{msg}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception:
+                    pass
+            asyncio.run_coroutine_threadsafe(do_edit(), loop)
+
+        res = await asyncio.to_thread(ghost_mgr.backup_to_github, progress_callback=progress_cb)
+
+        if not res.get("success"):
+            err_text = f"❌ *GitHub Backup Failed!*\n\nError: `{res.get('error', 'Unknown error')}`"
+            keyboard = [[InlineKeyboardButton("⬅️ Back to GitHub Menu", callback_data="menu_github")]]
+            await query.edit_message_text(err_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+            return
+
+        if res.get("unchanged"):
+            keyboard = [
+                [InlineKeyboardButton("🐙 GitHub Menu", callback_data="menu_github")],
+                [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]
+            ]
+            await query.edit_message_text(
+                "ℹ️ *Repository is Already Up to Date*\n\n"
+                f"No changes detected since last backup. All {res.get('posts', 0)} posts and {res.get('pages', 0)} pages are synchronized.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        success_text = (
+            f"✅ *GitHub Backup Completed Successfully!*\n\n"
+            f"🐙 *Repository:* `{res.get('repo')}`\n"
+            f"🌿 *Branch:* `{res.get('branch')}`\n"
+            f"📦 *Commit:* `{res.get('commit')}`\n"
+            f"📝 *Posts Synced:* `{res.get('posts')}`\n"
+            f"📄 *Pages Synced:* `{res.get('pages')}`\n"
+            f"🕒 *Timestamp:* `{res.get('timestamp')}`\n\n"
+            f"🔒 *Privacy Guarantee:* Incident support cases and evidence files were strictly excluded."
+        )
+        keyboard = [
+            [InlineKeyboardButton("📥 Restore from GitHub", callback_data="gh_restore_ask")],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(success_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+    # 12. GITHUB RESTORE CONFIRMATION
+    elif data == "gh_restore_ask":
+        gh_status = ghost_mgr.get_github_status()
+        if not gh_status["configured"]:
+            await query.edit_message_text(
+                "⚠️ *GitHub Sync Not Configured*\n\nPlease set up with `/github_setup <repo_url> <token>`.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="menu_github")]]),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        confirm_text = (
+            f"⚠️ *Confirm Restore from Private GitHub Repository*\n\n"
+            f"🐙 *Repository:* `{gh_status['repo']}`\n"
+            f"🌿 *Branch:* `{gh_status['branch']}`\n\n"
+            f"🚨 *Warning:* This operation will:\n"
+            f"1. Gracefully stop Ghost\n"
+            f"2. Pull the latest unzipped commit from GitHub\n"
+            f"3. Restore database schema, posts, pages, and settings\n"
+            f"4. Restore media images and custom themes\n"
+            f"5. Secure Linux permissions and restart Ghost\n\n"
+            f"Do you want to proceed with restoring from GitHub?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("✅ Yes, Restore from GitHub", callback_data="gh_restore_do")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="menu_github")]
+        ]
+        await query.edit_message_text(confirm_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+    # 13. GITHUB RESTORE EXECUTE
+    elif data == "gh_restore_do":
+        await query.edit_message_text(
+            "⏳ *Starting Restore from GitHub...*\n\nPlease wait while Ghost pulls and restores your publication...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        loop = asyncio.get_running_loop()
+        last_reported = ""
+
+        def progress_cb(msg: str):
+            nonlocal last_reported
+            if msg == last_reported:
+                return
+            last_reported = msg
+            async def do_edit():
+                try:
+                    await query.edit_message_text(
+                        f"⏳ *Restoring Ghost from GitHub...*\n\n{msg}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception:
+                    pass
+            asyncio.run_coroutine_threadsafe(do_edit(), loop)
+
+        res = await asyncio.to_thread(ghost_mgr.restore_from_github, progress_callback=progress_cb)
+
+        if not res.get("success"):
+            err_text = f"❌ *GitHub Restore Failed!*\n\nError: `{res.get('error', 'Unknown error')}`"
+            keyboard = [[InlineKeyboardButton("⬅️ Back to GitHub Menu", callback_data="menu_github")]]
+            await query.edit_message_text(err_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+            return
+
+        success_text = (
+            f"🎉 *Ghost Publication Successfully Restored from GitHub!*\n\n"
+            f"✅ Restored from commit `{res.get('commit')}` on branch `{res.get('branch')}`.\n"
+            f"✅ Database posts, pages, and settings synchronized.\n"
+            f"✅ Uploaded media images and themes restored.\n"
+            f"✅ Linux permissions secured & Ghost service active."
+        )
+        keyboard = [
+            [InlineKeyboardButton("📊 Check Status", callback_data="menu_status")],
+            [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(success_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+    # 14. GITHUB SETUP GUIDE
+    elif data == "gh_setup_info":
+        info_text = (
+            "⚙️ *GitHub Sync Setup Guide*\n\n"
+            "1️⃣ **Create Private Repository**:\n"
+            "Go to [github.com/new](https://github.com/new) and create a **Private** repository (e.g. `ghost-backup`).\n\n"
+            "2️⃣ **Create Personal Access Token (PAT)**:\n"
+            "Go to [github.com/settings/tokens](https://github.com/settings/tokens)\n"
+            "Click *Generate new token (classic)* and check the `repo` scope.\n\n"
+            "3️⃣ **Send Setup Command in Chat**:\n"
+            "`/github_setup <repo_url> <token> [branch]`\n\n"
+            "*Example:*\n"
+            "`/github_setup https://github.com/Lordgrim77/ghost-backup.git ghp_yourSecretToken main`\n\n"
+            "🔒 *Security:* Your message containing the secret token will be automatically deleted immediately upon receipt."
+        )
+        keyboard = [
+            [InlineKeyboardButton("🐙 GitHub Menu", callback_data="menu_github")],
+            [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(info_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+
+    # 15. HELP & INFO
     elif data == "menu_help":
         help_text = (
             "ℹ️ *Ghost Telegram Bot Help*\n\n"
@@ -630,6 +879,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "If under 48 MB, sends it directly in this chat!\n\n"
             "• *♻️ Restore Backup:* Restores a saved backup. Auto-fixes path slashes, protects default "
             "Ghost theme symlinks (`casper`/`source`), syncs database, and restarts Ghost.\n\n"
+            "• *🐙 GitHub Sync (Private):* Save unzipped posts, pages, images, and database to a private GitHub repo. "
+            "Never syncs support vault or evidence files. 1-click restore available directly from GitHub!\n\n"
             "• *🛡️ Support & Incident Cases:* View confidential incident cases submitted via the `/support/` portal, "
             "inspect metadata-scrubbed evidence files, update status (In Review, Closed, Rejected), and chat directly with reporters.\n\n"
             "• *🔗 URL Download:* Send `/url <link>` to download and restore any backup hosted online "
@@ -898,6 +1149,221 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 
+async def github_setup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Configures the private GitHub backup repository and token."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        await send_unauthorized(update)
+        return
+
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "ℹ️ *GitHub Sync Setup Usage:*\n"
+            "`/github_setup <repo_url> <personal_access_token> [branch]`\n\n"
+            "*Example:*\n"
+            "`/github_setup https://github.com/Lordgrim77/my-backup.git ghp_xxxx main`\n\n"
+            "💡 *Token Requirements:* A GitHub Personal Access Token (classic) with `repo` scope.\n"
+            "Create one at: https://github.com/settings/tokens",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    repo_url = context.args[0].strip()
+    token = context.args[1].strip()
+    branch = context.args[2].strip() if len(context.args) > 2 else "main"
+
+    # Immediately delete message containing the token for security
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    status_msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="⏳ *Testing GitHub connection & validating permissions...*",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    valid, err_or_ok = await asyncio.to_thread(ghost_mgr.test_github_connection, repo_url, token)
+    if not valid:
+        keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
+        await status_msg.edit_text(
+            f"❌ *GitHub Connection Failed!*\n\n"
+            f"Error: `{err_or_ok}`\n\n"
+            f"Please verify that the repository URL exists and your token has `repo` permissions.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    _update_env_file({
+        "GITHUB_BACKUP_REPO": repo_url,
+        "GITHUB_TOKEN": token,
+        "GITHUB_BRANCH": branch
+    })
+    os.environ["GITHUB_BACKUP_REPO"] = repo_url
+    os.environ["GITHUB_TOKEN"] = token
+    os.environ["GITHUB_BRANCH"] = branch
+
+    clean_repo = re.sub(r"https?://[^@]+@", "https://", repo_url)
+    masked_token = f"{token[:4]}...{token[-4:]}" if len(token) > 8 else "Configured"
+
+    keyboard = [
+        [InlineKeyboardButton("📤 Backup to GitHub Now", callback_data="gh_backup_now")],
+        [InlineKeyboardButton("🐙 GitHub Menu", callback_data="menu_github")]
+    ]
+    await status_msg.edit_text(
+        f"✅ *GitHub Backup Configured Successfully!*\n\n"
+        f"🐙 *Repository:* `{clean_repo}`\n"
+        f"🌿 *Branch:* `{branch}`\n"
+        f"🔑 *Token:* `{masked_token}` (Validated)\n\n"
+        f"🔒 _(Your message containing the secret token was automatically deleted from chat for security)_",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+async def github_backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Triggers an unzipped publication backup directly to GitHub."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        await send_unauthorized(update)
+        return
+
+    status = ghost_mgr.get_github_status()
+    if not status["configured"]:
+        await update.message.reply_text(
+            "⚠️ *GitHub Not Configured*\n\n"
+            "Please configure your repository and token first:\n"
+            "`/github_setup <repo_url> <token> [branch]`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    status_msg = await update.message.reply_text(
+        "⏳ *Starting Ghost GitHub Backup Process...*",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    loop = asyncio.get_running_loop()
+    last_reported = ""
+
+    def progress_cb(msg: str):
+        nonlocal last_reported
+        if msg == last_reported:
+            return
+        last_reported = msg
+        async def do_edit():
+            try:
+                await status_msg.edit_text(
+                    f"⏳ *Ghost GitHub Backup in progress...*\n\n{msg}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception:
+                pass
+        asyncio.run_coroutine_threadsafe(do_edit(), loop)
+
+    res = await asyncio.to_thread(ghost_mgr.backup_to_github, progress_callback=progress_cb)
+    if not res.get("success"):
+        keyboard = [[InlineKeyboardButton("🐙 GitHub Menu", callback_data="menu_github")]]
+        await status_msg.edit_text(
+            f"❌ *GitHub Backup Failed!*\n\nError: `{res.get('error', 'Unknown error')}`",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if res.get("unchanged"):
+        keyboard = [[InlineKeyboardButton("🐙 GitHub Menu", callback_data="menu_github")]]
+        await status_msg.edit_text(
+            f"ℹ️ *Repository is Already Up to Date*\n\nNo changes detected since last backup.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    success_text = (
+        f"✅ *GitHub Backup Completed Successfully!*\n\n"
+        f"🐙 *Repository:* `{res.get('repo')}`\n"
+        f"🌿 *Branch:* `{res.get('branch')}`\n"
+        f"📦 *Commit:* `{res.get('commit')}`\n"
+        f"📝 *Posts Synced:* `{res.get('posts')}`\n"
+        f"📄 *Pages Synced:* `{res.get('pages')}`\n"
+        f"🕒 *Timestamp:* `{res.get('timestamp')}`\n\n"
+        f"🔒 *Privacy Note:* Evidence files and support cases were strictly excluded."
+    )
+    keyboard = [
+        [InlineKeyboardButton("📥 Restore from GitHub", callback_data="gh_restore_ask")],
+        [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]
+    ]
+    await status_msg.edit_text(success_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+
+async def github_restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Triggers restore from private GitHub repository."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        await send_unauthorized(update)
+        return
+
+    status = ghost_mgr.get_github_status()
+    if not status["configured"]:
+        await update.message.reply_text(
+            "⚠️ *GitHub Not Configured*\n\n"
+            "Please configure your repository and token first:\n"
+            "`/github_setup <repo_url> <token> [branch]`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    confirm_text = (
+        f"⚠️ *Confirm Restore from Private GitHub Repository*\n\n"
+        f"🐙 *Repository:* `{status['repo']}`\n"
+        f"🌿 *Branch:* `{status['branch']}`\n\n"
+        f"🚨 *Warning:* This operation will:\n"
+        f"1. Gracefully stop Ghost\n"
+        f"2. Pull the latest unzipped commit from GitHub\n"
+        f"3. Restore database schema, posts, pages, and settings\n"
+        f"4. Restore media images and custom themes\n"
+        f"5. Secure Linux permissions and restart Ghost\n\n"
+        f"Do you want to proceed?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("✅ Yes, Restore Now", callback_data="gh_restore_do")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="menu_github")]
+    ]
+    await update.message.reply_text(confirm_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+
+async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows current configuration and sync status of GitHub repository."""
+    user = update.effective_user
+    if not is_authorized(user.id):
+        await send_unauthorized(update)
+        return
+
+    gh_status = ghost_mgr.get_github_status()
+    state_tag = "🟢 Configured" if gh_status["configured"] else "⚠️ Not Configured"
+
+    text = (
+        f"🐙 *GitHub Sync Status*\n\n"
+        f"• *Status:* {state_tag}\n"
+        f"• *Repository:* `{gh_status['repo']}`\n"
+        f"• *Branch:* `{gh_status['branch']}`\n"
+        f"• *Token:* `{gh_status['token_status']}`\n"
+        f"• *Last Commit:* `{gh_status['last_commit']}`\n"
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("📤 Backup Now", callback_data="gh_backup_now"),
+            InlineKeyboardButton("📥 Restore", callback_data="gh_restore_ask"),
+        ],
+        [InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]
+    ]
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+
+
 async def post_init(application: Application):
     """Start Support Hub API server and register bot bridge on the asyncio event loop."""
     global support_api_server
@@ -994,6 +1460,10 @@ def main():
 
     # Handlers
     app.add_handler(CommandHandler(["start", "menu"], start_command))
+    app.add_handler(CommandHandler(["github_setup", "gh_setup"], github_setup_command))
+    app.add_handler(CommandHandler(["github_backup", "gh_backup"], github_backup_command))
+    app.add_handler(CommandHandler(["github_restore", "gh_restore"], github_restore_command))
+    app.add_handler(CommandHandler(["github_status", "gh_status"], github_status_command))
     app.add_handler(CommandHandler("cases", cases_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("url", url_command))

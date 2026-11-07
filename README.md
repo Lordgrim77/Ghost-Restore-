@@ -283,7 +283,9 @@ sudo nginx -t && sudo systemctl reload nginx
 +-------------------------------------------------------------+
 |   [ 📦 Create Backup ]     |    [ ♻️ Restore Backup ]      |
 +-------------------------------------------------------------+
-|   [ 📊 Ghost Status ]      |    [ 📑 List Backups ]        |
+|   [ 🐙 GitHub Sync ]       |    [ 📊 Ghost Status ]        |
++-------------------------------------------------------------+
+|   [ 🛡️ Support Cases ]     |    [ 📑 List Backups ]        |
 +-------------------------------------------------------------+
 |   [ 🔄 Restart Ghost ]     |    [ ℹ️ Help & Info ]         |
 +-------------------------------------------------------------+
@@ -303,6 +305,21 @@ sudo nginx -t && sudo systemctl reload nginx
 4. Restores the MySQL database using `SET FOREIGN_KEY_CHECKS=0`.
 5. Corrects directory permissions (`chmod 775` on folders, `chmod 664` on files, `chown -R ghost:ghost`).
 6. Starts Ghost and performs a health check.
+
+#### 🐙 Private GitHub Backup & Restore (Unzipped Content Archive):
+Sync your publication to a private GitHub repository in an **unzipped, clean layout** that resembles a natural static archive to avoid unwanted attention and Git size issues:
+- **`posts/<slug>.json` & `pages/<slug>.json`**: Individual human-readable JSON files with post title, slug, HTML, Lexical/Mobiledoc, custom excerpt, tags, authors, and status.
+- **`images/`**: Full unzipped directory of uploaded media images preserving year/month folder structure.
+- **`database/ghost_database.sql`**: Full MySQL/SQLite dump for loss-free relational restoration.
+- **`settings/routes.yaml` & `themes/`**: Custom routes and active custom themes.
+- **🔒 Strict Privacy Guarantee**: Confidential support vault and evidence records are strictly excluded (`support_vault/` and `evidence/` are never committed).
+- **1-Click Restore**: Pulls the latest commit from your private GitHub repo, imports the database, restores images and themes, secures Linux permissions, and restarts Ghost.
+
+##### GitHub Bot Commands:
+- `/github_setup <repo_url> <token> [branch]` *(alias `/gh_setup`)*: Validates connection and writes credentials to `.env` (automatically deletes message for security).
+- `/github_backup` *(alias `/gh_backup`)*: Exports and pushes unzipped publication content to GitHub.
+- `/github_restore` *(alias `/gh_restore`)*: 1-Click restore of publication from your private GitHub repository.
+- `/github_status` *(alias `/gh_status`)*: Displays repository configuration, branch, and latest synced commit.
 
 #### Real-Time Support Triage:
 When a visitor or member submits a report on `/support/`, the bot:
