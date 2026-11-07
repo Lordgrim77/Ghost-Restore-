@@ -360,7 +360,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"No backup archives were found in `{BACKUPS_DIR}`, `/tmp`, or `/home/ubuntu`.\n\n"
                 "💡 *Options:*\n"
                 "• Tap *Create Backup* to create one right now.\n"
-                "• Upload a zip under 20 MB directly to this chat.\n"
+                "• Upload a backup zip directly to this chat.\n"
                 "• Send `/url <download_link>` to fetch from Google Drive, Dropbox, or file.io.\n"
                 "• Upload via GCP SSH to `/home/ubuntu/` and type `/restore <filename>`."
             )
@@ -674,26 +674,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Check 20 MB Telegram Bot API download limit
     file_size_bytes = doc.file_size or 0
     size_mb = round(file_size_bytes / (1024 * 1024), 2)
-
-    if file_size_bytes > 20 * 1024 * 1024:
-        limit_msg = (
-            f"⚠️ *File is Too Large for Telegram Direct Upload ({size_mb} MB)*\n\n"
-            f"Telegram limits bots to downloading files of *up to 20 MB*.\n\n"
-            f"💡 *2 Easy Ways to Restore This Backup:*\n\n"
-            f"1️⃣ **Direct URL Download (Fastest)**:\n"
-            f"Upload your backup to [file.io](https://www.file.io), Google Drive, or Dropbox, and send:\n"
-            f"`/url <download_link>`\n\n"
-            f"2️⃣ **Upload via GCP Web Terminal**:\n"
-            f"In your GCP SSH browser window, click the **Gear Icon ⚙️ (top-right)** ➔ **Upload file**.\n"
-            f"Once uploaded to `/home/ubuntu/{file_name}`, send:\n"
-            f"`/restore /home/ubuntu/{file_name}`\n"
-            f"*(or tap ♻️ Restore Backup in the menu)*"
-        )
-        await update.message.reply_text(limit_msg, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-        return
 
     progress_msg = await update.message.reply_text(
         f"📥 *Receiving backup archive `{file_name}` ({size_mb} MB)...*",
@@ -706,8 +688,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_name = f"uploaded_{timestamp}_{clean_name}"
         target_path = os.path.join(BACKUPS_DIR, target_name)
 
-        tg_file = await doc.get_file()
-        await tg_file.download_to_drive(custom_path=target_path)
+        # Extended timeouts for large archive transfers
+        tg_file = await doc.get_file(read_timeout=600, write_timeout=600, connect_timeout=120)
+        await tg_file.download_to_drive(custom_path=target_path, read_timeout=600, write_timeout=600)
 
         text = (
             f"📥 *Backup File Uploaded Successfully!*\n\n"
@@ -730,10 +713,23 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"Error handling document upload: {e}")
-        await progress_msg.edit_text(
-            f"❌ *Failed to download backup file:*\n`{e}`",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        err_msg = str(e).lower()
+        if "file is too big" in err_msg or "fileisttoobig" in str(type(e)).lower():
+            limit_msg = (
+                f"⚠️ *File Exceeds Telegram Cloud Bot Limit ({size_mb} MB)*\n\n"
+                f"Telegram's default cloud API restricts bot downloads exceeding 20 MB (unless using a self-hosted Local Bot API server).\n\n"
+                f"💡 *Easy Alternatives to Restore This File:*\n\n"
+                f"1️⃣ **Direct URL Download**:\n"
+                f"Send: `/url <direct_download_link>` (fetches archives of any size directly onto the server)\n\n"
+                f"2️⃣ **Server Upload**:\n"
+                f"Upload via SSH/SCP to `/home/ubuntu/{file_name}` and send: `/restore /home/ubuntu/{file_name}`"
+            )
+            await progress_msg.edit_text(limit_msg, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+        else:
+            await progress_msg.edit_text(
+                f"❌ *Failed to download backup file:*\n`{e}`",
+                parse_mode=ParseMode.MARKDOWN
+            )
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -970,13 +966,24 @@ def main():
     print("--------------------------------------------------")
     print("Bot is starting polling...")
 
-    app = (
+    builder = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .post_init(post_init)
         .post_shutdown(post_shutdown)
-        .build()
     )
+    custom_api_url = os.getenv("TELEGRAM_API_URL") or os.getenv("LOCAL_BOT_API_URL")
+    if custom_api_url:
+        clean_url = custom_api_url.rstrip("/")
+        if not clean_url.endswith("/bot"):
+            clean_url = f"{clean_url}/bot"
+        builder = builder.base_url(clean_url)
+        clean_file_url = custom_api_url.rstrip("/")
+        if not clean_file_url.endswith("/file/bot"):
+            clean_file_url = f"{clean_file_url}/file/bot"
+        builder = builder.base_file_url(clean_file_url)
+        print(f"Custom Telegram Bot API Endpoint: {custom_api_url}")
+    app = builder.build()
 
     # Handlers
     app.add_handler(CommandHandler(["start", "menu"], start_command))
