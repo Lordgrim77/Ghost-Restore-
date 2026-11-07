@@ -747,7 +747,10 @@ class SupportBotBridge:
             pass
 
         data = query.data or ""
-        action, _, case_code = data.partition(":")
+        parts = data.split(":")
+        action = parts[0] if parts else ""
+        case_code = parts[1] if len(parts) > 1 else ""
+        extra_param = parts[2] if len(parts) > 2 else ""
 
         try:
             case_data = self.vault.get_case(case_code)

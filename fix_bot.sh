@@ -217,3 +217,4 @@ journalctl -u ghost-telegram-bot -n 15 --no-pager
 echo ""
 echo -e "${GREEN}All diagnostics and auto-repair routines finished!${NC}"
 echo ""
+
