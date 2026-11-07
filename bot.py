@@ -806,6 +806,13 @@ async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "dropbox.com" in raw_url:
         raw_url = raw_url.replace("dl=0", "dl=1")
 
+    # Normalize Google Drive sharing links to direct download
+    if "drive.google.com" in raw_url:
+        import re
+        gdrive_match = re.search(r"/d/([a-zA-Z0-9_-]+)", raw_url) or re.search(r"id=([a-zA-Z0-9_-]+)", raw_url)
+        if gdrive_match:
+            raw_url = f"https://drive.google.com/uc?export=download&id={gdrive_match.group(1)}&confirm=t"
+
     status_msg = await update.message.reply_text(
         "⏳ *Downloading backup archive from URL directly to server...*",
         parse_mode=ParseMode.MARKDOWN
@@ -821,7 +828,7 @@ async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raw_url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             )
-            with urllib.request.urlopen(req, timeout=180) as resp, open(target_path, "wb") as out:
+            with urllib.request.urlopen(req, timeout=600) as resp, open(target_path, "wb") as out:
                 shutil.copyfileobj(resp, out)
 
         await asyncio.to_thread(do_download)
