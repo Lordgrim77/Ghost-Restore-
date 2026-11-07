@@ -17,6 +17,7 @@ A production-ready suite for Ghost CMS publications featuring:
   - [Option A: 1-Click Automated Theme Deployer (Recommended)](#option-a-1-click-automated-theme-deployer-recommended)
   - [Option B: Manual Theme Setup via Ghost Admin](#option-b-manual-theme-setup-via-ghost-admin)
   - [Theme Features & Support Portal](#theme-features--support-portal)
+  - [👥 Team Page Customization (team.json)](#-team-page-customization-teamjson)
 - [🤖 Part 2: Bot Setup & Installation](#-part-2-bot-setup--installation)
   - [Prerequisites (Telegram Bot & User ID)](#prerequisites-telegram-bot--user-id)
   - [Option A: 1-Click Interactive Automated Installer (Recommended)](#option-a-1-click-interactive-automated-installer-recommended)
@@ -100,6 +101,80 @@ If you prefer uploading and configuring the theme manually via the Ghost Admin p
 * **Anonymous Access Keys**: Anonymous reporters receive a unique Case Reference Code and secure 32-character Access Key stored in `localStorage` and trackable via **`[ 🔍 Track by Code ]`**.
 * **Two-Way Live Chat**: Integrated correspondence thread allowing reporters and staff to exchange updates and attachments directly within the ticket view.
 * **Responsive Dark/Light Mode**: Obsidian styling with fluid transition and persistent theme memory.
+
+---
+
+### 👥 Team Page Customization (`team.json`)
+
+The `/team/` showcase dynamically renders team members configured in `assets/data/team.json`. The [`team-page.js`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/team-page.js) engine parses this array, sorts operatives by priority, and automatically matches authors to their native Ghost profiles.
+
+#### Supported Variables Reference
+
+| Variable | Type | Required | Description | Example |
+| :--- | :--- | :---: | :--- | :--- |
+| **`order`** | `number` | Recommended | Sort priority. Cards sort ascending (`1` appears first, then `2`, `3`...). | `1` |
+| **`name`** | `string` | **Yes** | Display name shown on the card. | `"LordGrim"` |
+| **`title`** | `string` | **Yes** | Role or title displayed beneath the name. | `"Lead Investigator"` |
+| **`slug`** | `string` | Recommended | Ghost author slug. If it matches a Ghost staff author, it links their posts, author page, and profile photo. | `"admin"` |
+| **`alt_slug`** | `string` | Optional | Secondary fallback slug if the author slug differs across installs. | `"xlordgrim"` |
+| **`location`** | `string` | Optional | Office, lab, or regional location (rendered with pin icon). | `"Global Operations"` |
+| **`bio`** | `string` | Optional | Short description or mission statement. *(Defaults to Ghost author bio if omitted)*. | `"Specializing in OSINT & digital forensics."` |
+| **`avatar`** | `string` | Optional | Image URL for profile photo. *(Defaults to Ghost author avatar, or auto-generates monogram initials)*. | `"/assets/images/team/member1.jpg"` |
+| **`url`** | `string` | Optional | Custom destination for the **"View Profile"** button. *(Defaults to `/author/<slug>/` if matched)*. | `"/author/admin/"` |
+
+#### Social & Contact Links (Rendered in Card Footer)
+
+| Variable | Type | Description | Example |
+| :--- | :--- | :--- | :--- |
+| **`telegram`** | `string` (URL) | Telegram profile, channel, or bot link. | `"https://t.me/StopAbuseTeam"` |
+| **`twitter`** | `string` (URL) | X / Twitter profile URL. | `"https://x.com/username"` |
+| **`github`** | `string` (URL) | GitHub profile URL. | `"https://github.com/username"` |
+| **`website`** | `string` (URL) | Personal or organizational website. | `"https://example.org"` |
+| **`email`** | `string` | Contact email address. | `"investigations@example.com"` |
+
+#### Complete Example (`team.json`)
+
+```json
+[
+  {
+    "order": 1,
+    "slug": "admin",
+    "alt_slug": "xlordgrim",
+    "name": "LordGrim",
+    "title": "Lead Investigator & Developer",
+    "location": "Global Operations",
+    "bio": "Lead researcher coordinating digital forensics and threat intelligence.",
+    "avatar": "",
+    "telegram": "https://t.me/StopAbuseTeam",
+    "github": "https://github.com/Lordgrim77",
+    "website": "https://example.org"
+  },
+  {
+    "order": 2,
+    "slug": "analyst-1",
+    "name": "Cyber Forensic Analyst",
+    "title": "Digital Forensics & Incident Response",
+    "location": "Forensics Lab",
+    "bio": "Specialized in data carving, network packet analysis, and evidence custody.",
+    "telegram": "https://t.me/StopAbuseTeam"
+  },
+  {
+    "order": 3,
+    "slug": "intel-lead",
+    "name": "OSINT Investigator",
+    "title": "Threat Tracking & Analysis",
+    "location": "Global Operations",
+    "bio": "Open-source intelligence gathering and pattern identification.",
+    "telegram": "https://t.me/StopAbuseTeam"
+  }
+]
+```
+
+#### Where to Edit
+
+* **Live Server**: `/var/www/ghost/content/themes/<active-theme>/assets/data/team.json`
+* **Repository Source**: [`team.json`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/team.json) and inside [`assets/data/team.json`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/assets/data/team.json)
+* **Inline Fallback**: Inside [`page-team.hbs`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/page-team.hbs#L361-L389) `<script id="gm-team-default-data" type="application/json">`
 
 ---
 
@@ -343,10 +418,13 @@ Ghost-Restore/
 ├── page-support.hbs          # Clean support intake & member case tracking portal
 ├── page-team.hbs             # Team showcase page template
 ├── routes.yaml               # Routing configuration for /support/ and /team/
+├── team.json                 # Team members data configuration
+├── team-page.js              # Client-side dynamic team card rendering engine
 │
 ├── deploy_theme.sh           # 1-Click theme & support portal deployer script
 ├── install.sh                # 1-Click interactive bot installer
 ├── setup_support.sh          # 1-Click support hub connector & updater
+├── fix_bot.sh                # 1-Click diagnostic and auto-repair utility
 ├── uninstall.sh              # Clean removal script
 │
 ├── bot.py                    # Telegram bot event handler & triage bridge
