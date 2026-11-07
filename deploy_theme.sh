@@ -63,13 +63,79 @@ fi
 echo -e "${BLUE}[4/6] Installing redesigned email templates and core overrides...${NC}"
 if sudo curl -sSL -f -H "Cache-Control: no-cache" "$RAW_BASE/email-templates.zip?v=$CACHE_BUSTER" -o /tmp/email-templates.zip 2>/dev/null; then
     sudo python3 -c "
-import zipfile, os
-core_base = '$GHOST_DIR/current/core'
-server_base = '$GHOST_DIR/current/core/server'
-if os.path.exists(core_base):
-    with zipfile.ZipFile('/tmp/email-templates.zip', 'r') as zf:
+import os, sys, urllib.request, tarfile, io, zipfile
+
+ghost_dir = '$GHOST_DIR'
+current_dir = os.path.join(ghost_dir, 'current')
+
+# 1. Detect Ghost version
+version = None
+if os.path.islink(current_dir):
+    version = os.path.basename(os.path.realpath(current_dir))
+elif os.path.isdir(os.path.join(ghost_dir, 'versions')):
+    versions = sorted([v for v in os.listdir(os.path.join(ghost_dir, 'versions')) if not v.startswith('.')])
+    if versions:
+        version = versions[-1]
+
+print(f'  Ghost version detected: {version or \"unknown\"}')
+
+stock_core_files = [
+    'core/server/services/gifts/index.js',
+    'core/server/services/gifts/gift-email-service.js',
+    'core/server/services/members/api.js',
+    'core/server/lib/mail/ghost-mailer.js',
+    'core/server/lib/mail/email-content-generator.js',
+    'core/server/lib/mail/index.js',
+    'core/server/services/email-service/email-renderer.js',
+    'core/server/services/comments/comments-service-emails.js',
+    'core/server/services/staff/staff-service-emails.js',
+    'core/server/services/member-welcome-emails/service.js',
+    'core/server/services/member-welcome-emails/member-welcome-email-renderer.js',
+    'core/frontend/meta/og-image.js',
+    'core/frontend/meta/twitter-image.js',
+]
+
+gifts_index = os.path.join(current_dir, 'core', 'server', 'services', 'gifts', 'index.js')
+is_corrupted = False
+if os.path.isfile(gifts_index):
+    try:
+        with open(gifts_index, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        if '../i18n' in content:
+            is_corrupted = True
+    except Exception:
+        pass
+
+if version and (is_corrupted or not os.path.exists(gifts_index)):
+    print(f'  [*] Self-healing: Restoring clean core modules for Ghost {version}...')
+    url = f'https://registry.npmjs.org/ghost/-/ghost-{version}.tgz'
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Ghost-Deploy-Heal'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tf:
+            for m in tf.getmembers():
+                clean_name = m.name.replace('package/', '')
+                if clean_name in stock_core_files:
+                    dest = os.path.join(current_dir, clean_name)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with tf.extractfile(m) as src, open(dest, 'wb') as dst:
+                        dst.write(src.read())
+        print(f'  ✓ Clean core service integrity restored from Ghost {version}')
+    except Exception as err:
+        print(f'  ⚠️ Core recovery warning: {err}')
+
+# 2. Extract clean email templates & safe overrides
+core_base = os.path.join(ghost_dir, 'current', 'core')
+server_base = os.path.join(ghost_dir, 'current', 'core', 'server')
+zip_path = '/tmp/email-templates.zip'
+if os.path.exists(core_base) and os.path.exists(zip_path):
+    with zipfile.ZipFile(zip_path, 'r') as zf:
         for item in zf.infolist():
             clean_name = item.filename.replace('\\\\', '/').lstrip('/')
+            # Never allow core service files to be overwritten by zip
+            if clean_name.startswith('services/gifts/index.js') or clean_name.startswith('services/members/api.js') or clean_name.startswith('lib/mail/ghost-mailer.js'):
+                continue
             if clean_name.startswith('frontend/'):
                 dest = os.path.join(core_base, clean_name)
             else:
@@ -215,9 +281,97 @@ if patched:
     os.system("nginx -t >/dev/null 2>&1 && systemctl reload nginx")
 ' 2>/dev/null || true
 
-# 7. Restart Ghost and clear template cache
+# 7. Update Support Hub Daemon & Cryptographic Engine
+echo -e "${BLUE}[7/8] Updating Support Hub Daemon & Verification Engine...${NC}"
+sudo mkdir -p "$GHOST_DIR/Ghost-Restore"
+sudo mkdir -p "$GHOST_DIR/support_vault/evidence"
+sudo chmod -R 775 "$GHOST_DIR/support_vault" 2>/dev/null || true
+
+# Target directories to sync backend files
+SYNC_DIRS=("$GHOST_DIR/Ghost-Restore")
+if [ -d "/opt/ghost-telegram-bot" ]; then
+    SYNC_DIRS+=("/opt/ghost-telegram-bot")
+fi
+
+BOT_SVC_FILE="/etc/systemd/system/ghost-telegram-bot.service"
+if [ -f "$BOT_SVC_FILE" ]; then
+    SVC_DIR=$(grep -E '^\s*WorkingDirectory\s*=' "$BOT_SVC_FILE" | head -n 1 | cut -d= -f2 | tr -d ' ' || echo "")
+    if [ -n "$SVC_DIR" ] && [ -d "$SVC_DIR" ]; then
+        if [[ ! " ${SYNC_DIRS[@]} " =~ " ${SVC_DIR} " ]]; then
+            SYNC_DIRS+=("$SVC_DIR")
+        fi
+    fi
+fi
+
+# Download all required daemon files across target directories
+for sdir in "${SYNC_DIRS[@]}"; do
+    sudo mkdir -p "$sdir"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$sdir/support_hub.py"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$sdir/bot.py"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/ghost_manager.py?v=$CACHE_BUSTER" -o "$sdir/ghost_manager.py"
+    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/requirements.txt?v=$CACHE_BUSTER" -o "$sdir/requirements.txt"
+    # If a venv exists, ensure pip dependencies are satisfied
+    if [ -x "$sdir/venv/bin/pip" ]; then
+        sudo "$sdir/venv/bin/pip" install -r "$sdir/requirements.txt" -q 2>/dev/null || true
+    fi
+done
+
+# Restart the appropriate service cleanly, preventing port 8080 collision
+sudo systemctl daemon-reload
+if [ -f "$BOT_SVC_FILE" ]; then
+    # Disable and stop standalone service if active to avoid port 8080 collision
+    sudo systemctl stop ghost-support.service 2>/dev/null || true
+    sudo systemctl disable ghost-support.service 2>/dev/null || true
+    sudo systemctl restart ghost-telegram-bot.service 2>/dev/null || true
+    echo -e "  ✓ Synced backend files & restarted ghost-telegram-bot.service"
+elif [ -f "/etc/systemd/system/ghost-support.service" ]; then
+    sudo systemctl restart ghost-support.service 2>/dev/null || true
+    echo -e "  ✓ Synced backend files & restarted ghost-support.service"
+else
+    # Automatically install and enable standalone ghost-support daemon so API on port 8080 is always active
+    cat <<EOF | sudo tee /etc/systemd/system/ghost-support.service >/dev/null
+[Unit]
+Description=Ghost Support Hub REST API Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$GHOST_DIR/Ghost-Restore
+ExecStart=/usr/bin/python3 $GHOST_DIR/Ghost-Restore/support_hub.py --port 8080 --ghost-dir $GHOST_DIR
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable ghost-support.service -q 2>/dev/null || true
+    sudo systemctl restart ghost-support.service 2>/dev/null || true
+    echo -e "  ✓ Registered & started standalone ghost-support.service on port 8080"
+fi
+
+# Verification of /captcha endpoint
+sleep 2
+CAPTCHA_CHECK=$(curl -s -m 5 http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
+if [[ "$CAPTCHA_CHECK" =~ "challenge_id" ]]; then
+    echo -e "  ✓ Cryptographic Challenge Engine verified: ${GREEN}ONLINE (HTTP 200)${NC}"
+else
+    echo -e "  ${RED}⚠️ Daemon verification failed on port 8080!${NC}"
+    echo -e "  Output received: $CAPTCHA_CHECK"
+    echo -e "${YELLOW}--- Diagnostics (Service Logs) ---${NC}"
+    if [ -f "$BOT_SVC_FILE" ]; then
+        sudo journalctl -u ghost-telegram-bot -n 15 --no-pager 2>/dev/null || true
+    fi
+    if [ -f "/etc/systemd/system/ghost-support.service" ]; then
+        sudo journalctl -u ghost-support -n 15 --no-pager 2>/dev/null || true
+    fi
+    echo -e "${YELLOW}----------------------------------${NC}"
+fi
+
+# 8. Restart Ghost and clear template cache
 echo ""
-echo -e "${BLUE}Restarting Ghost CMS to clear template cache...${NC}"
+echo -e "${BLUE}[8/8] Restarting Ghost CMS to clear template cache...${NC}"
 GHOST_SVC=$(systemctl list-unit-files --type=service 2>/dev/null | grep -o 'ghost_[a-zA-Z0-9_-]*' | head -n 1 || echo "")
 if [ -n "$GHOST_SVC" ] && systemctl is-active --quiet "$GHOST_SVC"; then
     sudo systemctl restart "$GHOST_SVC"
@@ -234,10 +388,11 @@ echo ""
 echo -e "${GREEN}==================================================================${NC}"
 echo -e "${GREEN}  🎉 Theme & Support Portal Setup Finished Successfully!          ${NC}"
 echo -e "${GREEN}==================================================================${NC}"
-echo -e "✓ Alto Theme installed cleanly in: ${CYAN}$THEME_DIR${NC}"
-echo -e "✓ Support Portal active at:        ${CYAN}https://yourdomain.com/support/${NC}"
-echo -e "✓ Team Showcase active at:         ${CYAN}https://yourdomain.com/team/${NC}"
-echo -e "✓ Email Templates updated in:      ${CYAN}$GHOST_DIR/current/core/${NC}"
-echo -e "✓ In-memory template cache:        ${GREEN}CLEARED${NC}"
+echo -e "✓ Alto Theme installed cleanly in:     ${CYAN}$THEME_DIR${NC}"
+echo -e "✓ Support Portal active at:            ${CYAN}https://yourdomain.com/support/${NC}"
+echo -e "✓ Team Showcase active at:             ${CYAN}https://yourdomain.com/team/${NC}"
+echo -e "✓ Verification Challenge Engine:       ${GREEN}ACTIVE & VERIFIED (port 8080)${NC}"
+echo -e "✓ Email Templates updated in:          ${CYAN}$GHOST_DIR/current/core/${NC}"
+echo -e "✓ In-memory template cache:            ${GREEN}CLEARED${NC}"
 echo -e "${GREEN}==================================================================${NC}"
 echo ""

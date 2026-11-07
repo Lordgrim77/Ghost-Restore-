@@ -63,13 +63,79 @@ fi
 echo -e "${BLUE}[4/6] Installing redesigned email templates and core overrides...${NC}"
 if sudo curl -sSL -f -H "Cache-Control: no-cache" "$RAW_BASE/email-templates.zip?v=$CACHE_BUSTER" -o /tmp/email-templates.zip 2>/dev/null; then
     sudo python3 -c "
-import zipfile, os
-core_base = '$GHOST_DIR/current/core'
-server_base = '$GHOST_DIR/current/core/server'
-if os.path.exists(core_base):
-    with zipfile.ZipFile('/tmp/email-templates.zip', 'r') as zf:
+import os, sys, urllib.request, tarfile, io, zipfile
+
+ghost_dir = '$GHOST_DIR'
+current_dir = os.path.join(ghost_dir, 'current')
+
+# 1. Detect Ghost version
+version = None
+if os.path.islink(current_dir):
+    version = os.path.basename(os.path.realpath(current_dir))
+elif os.path.isdir(os.path.join(ghost_dir, 'versions')):
+    versions = sorted([v for v in os.listdir(os.path.join(ghost_dir, 'versions')) if not v.startswith('.')])
+    if versions:
+        version = versions[-1]
+
+print(f'  Ghost version detected: {version or \"unknown\"}')
+
+stock_core_files = [
+    'core/server/services/gifts/index.js',
+    'core/server/services/gifts/gift-email-service.js',
+    'core/server/services/members/api.js',
+    'core/server/lib/mail/ghost-mailer.js',
+    'core/server/lib/mail/email-content-generator.js',
+    'core/server/lib/mail/index.js',
+    'core/server/services/email-service/email-renderer.js',
+    'core/server/services/comments/comments-service-emails.js',
+    'core/server/services/staff/staff-service-emails.js',
+    'core/server/services/member-welcome-emails/service.js',
+    'core/server/services/member-welcome-emails/member-welcome-email-renderer.js',
+    'core/frontend/meta/og-image.js',
+    'core/frontend/meta/twitter-image.js',
+]
+
+gifts_index = os.path.join(current_dir, 'core', 'server', 'services', 'gifts', 'index.js')
+is_corrupted = False
+if os.path.isfile(gifts_index):
+    try:
+        with open(gifts_index, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        if '../i18n' in content:
+            is_corrupted = True
+    except Exception:
+        pass
+
+if version and (is_corrupted or not os.path.exists(gifts_index)):
+    print(f'  [*] Self-healing: Restoring clean core modules for Ghost {version}...')
+    url = f'https://registry.npmjs.org/ghost/-/ghost-{version}.tgz'
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Ghost-Deploy-Heal'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tf:
+            for m in tf.getmembers():
+                clean_name = m.name.replace('package/', '')
+                if clean_name in stock_core_files:
+                    dest = os.path.join(current_dir, clean_name)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with tf.extractfile(m) as src, open(dest, 'wb') as dst:
+                        dst.write(src.read())
+        print(f'  ✓ Clean core service integrity restored from Ghost {version}')
+    except Exception as err:
+        print(f'  ⚠️ Core recovery warning: {err}')
+
+# 2. Extract clean email templates & safe overrides
+core_base = os.path.join(ghost_dir, 'current', 'core')
+server_base = os.path.join(ghost_dir, 'current', 'core', 'server')
+zip_path = '/tmp/email-templates.zip'
+if os.path.exists(core_base) and os.path.exists(zip_path):
+    with zipfile.ZipFile(zip_path, 'r') as zf:
         for item in zf.infolist():
             clean_name = item.filename.replace('\\\\', '/').lstrip('/')
+            # Never allow core service files to be overwritten by zip
+            if clean_name.startswith('services/gifts/index.js') or clean_name.startswith('services/members/api.js') or clean_name.startswith('lib/mail/ghost-mailer.js'):
+                continue
             if clean_name.startswith('frontend/'):
                 dest = os.path.join(core_base, clean_name)
             else:
