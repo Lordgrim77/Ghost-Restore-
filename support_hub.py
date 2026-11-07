@@ -1171,14 +1171,24 @@ class SupportApiServer:
         return False
 
     async def start(self):
-        self.server = await asyncio.start_server(self.handle_client, self.host, self.port)
-        logger.info("Support REST API server active on http://%s:%d", self.host, self.port)
+        try:
+            self.server = await asyncio.start_server(self.handle_client, self.host, self.port)
+            logger.info("Support REST API server active on http://%s:%d", self.host, self.port)
+        except OSError as e:
+            if getattr(e, 'errno', None) in (98, 10048) or "address already in use" in str(e).lower():
+                logger.warning("Port %d on %s is already in use by an active daemon. HTTP listener skipped (daemon online).", self.port, self.host)
+                self.server = None
+            else:
+                raise
 
     async def stop(self):
         if self.server:
-            self.server.close()
-            await self.server.wait_closed()
-            logger.info("Support REST API server stopped.")
+            try:
+                self.server.close()
+                await self.server.wait_closed()
+                logger.info("Support REST API server stopped.")
+            except Exception as e:
+                logger.error("Error stopping Support REST API server: %s", e)
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:

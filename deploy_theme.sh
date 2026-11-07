@@ -306,6 +306,11 @@ if [ -f "$BOT_SVC_FILE" ]; then
     fi
 fi
 
+# Ensure Python3 and virtualenv packages exist
+if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y -q python3 python3-pip python3-venv curl >/dev/null 2>&1 || true
+fi
+
 # Download all required daemon files across target directories
 for sdir in "${SYNC_DIRS[@]}"; do
     sudo mkdir -p "$sdir"
@@ -313,26 +318,32 @@ for sdir in "${SYNC_DIRS[@]}"; do
     sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$sdir/bot.py"
     sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/ghost_manager.py?v=$CACHE_BUSTER" -o "$sdir/ghost_manager.py"
     sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/requirements.txt?v=$CACHE_BUSTER" -o "$sdir/requirements.txt"
-    # If a venv exists, ensure pip dependencies are satisfied
+
+    # Ensure venv exists and packages are installed
+    if [ ! -d "$sdir/venv" ]; then
+        sudo python3 -m venv "$sdir/venv" 2>/dev/null || true
+    fi
     if [ -x "$sdir/venv/bin/pip" ]; then
+        sudo "$sdir/venv/bin/pip" install --upgrade pip -q 2>/dev/null || true
         sudo "$sdir/venv/bin/pip" install -r "$sdir/requirements.txt" -q 2>/dev/null || true
+    fi
+    # Also install to system python as backup
+    sudo pip3 install -r "$sdir/requirements.txt" --break-system-packages -q 2>/dev/null || sudo pip3 install -r "$sdir/requirements.txt" -q 2>/dev/null || true
+
+    # Sync .env across candidate directories if missing
+    if [ ! -f "$sdir/.env" ]; then
+        if [ -f "$GHOST_DIR/Ghost-Restore/.env" ]; then
+            sudo cp "$GHOST_DIR/Ghost-Restore/.env" "$sdir/.env"
+        elif [ -f "/opt/ghost-telegram-bot/.env" ]; then
+            sudo cp "/opt/ghost-telegram-bot/.env" "$sdir/.env"
+        elif [ -f "$GHOST_DIR/.env" ]; then
+            sudo cp "$GHOST_DIR/.env" "$sdir/.env"
+        fi
     fi
 done
 
-# Restart the appropriate service cleanly, preventing port 8080 collision
-sudo systemctl daemon-reload
-if [ -f "$BOT_SVC_FILE" ]; then
-    # Disable and stop standalone service if active to avoid port 8080 collision
-    sudo systemctl stop ghost-support.service 2>/dev/null || true
-    sudo systemctl disable ghost-support.service 2>/dev/null || true
-    sudo systemctl restart ghost-telegram-bot.service 2>/dev/null || true
-    echo -e "  ✓ Synced backend files & restarted ghost-telegram-bot.service"
-elif [ -f "/etc/systemd/system/ghost-support.service" ]; then
-    sudo systemctl restart ghost-support.service 2>/dev/null || true
-    echo -e "  ✓ Synced backend files & restarted ghost-support.service"
-else
-    # Automatically install and enable standalone ghost-support daemon so API on port 8080 is always active
-    cat <<EOF | sudo tee /etc/systemd/system/ghost-support.service >/dev/null
+# Ensure fallback ghost-support.service unit is always installed
+cat <<EOF | sudo tee /etc/systemd/system/ghost-support.service >/dev/null
 [Unit]
 Description=Ghost Support Hub REST API Daemon
 After=network.target
@@ -348,28 +359,51 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
-    sudo systemctl daemon-reload
+
+# Sanitize ghost-telegram-bot.service if present (add - to EnvironmentFile so missing .env never halts boot)
+if [ -f "$BOT_SVC_FILE" ]; then
+    sudo sed -i 's/^EnvironmentFile=\([^-\/]*\)/EnvironmentFile=-\1/' "$BOT_SVC_FILE" 2>/dev/null || true
+    sudo sed -i 's/^EnvironmentFile=\//EnvironmentFile=-\//' "$BOT_SVC_FILE" 2>/dev/null || true
+fi
+
+sudo systemctl daemon-reload
+
+# Manage startup with auto-failover
+if [ -f "$BOT_SVC_FILE" ]; then
+    sudo systemctl stop ghost-support.service 2>/dev/null || true
+    sudo systemctl restart ghost-telegram-bot.service 2>/dev/null || true
+    echo -e "  ✓ Synced backend files & restarted ghost-telegram-bot.service"
+    sleep 3
+    CAPTCHA_CHECK=$(curl -s -m 5 http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
+    if [[ "$CAPTCHA_CHECK" =~ "challenge_id" ]]; then
+        echo -e "  ✓ Cryptographic Challenge Engine verified: ${GREEN}ONLINE (HTTP 200)${NC}"
+    else
+        echo -e "  ${YELLOW}⚠️ ghost-telegram-bot.service not listening on port 8080. Activating fallback ghost-support.service...${NC}"
+        sudo systemctl enable ghost-support.service -q 2>/dev/null || true
+        sudo systemctl restart ghost-support.service 2>/dev/null || true
+        sleep 2
+        CAPTCHA_CHECK=$(curl -s -m 5 http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
+        if [[ "$CAPTCHA_CHECK" =~ "challenge_id" ]]; then
+            echo -e "  ✓ Cryptographic Challenge Engine active via fallback: ${GREEN}ONLINE (HTTP 200)${NC}"
+        else
+            echo -e "  ${RED}⚠️ Daemon verification failed on port 8080!${NC}"
+            echo -e "  Output received: $CAPTCHA_CHECK"
+        fi
+        echo -e "${YELLOW}--- Diagnostics (ghost-telegram-bot logs) ---${NC}"
+        sudo journalctl -u ghost-telegram-bot -n 20 --no-pager 2>/dev/null || true
+        echo -e "${YELLOW}-------------------------------------------${NC}"
+    fi
+else
     sudo systemctl enable ghost-support.service -q 2>/dev/null || true
     sudo systemctl restart ghost-support.service 2>/dev/null || true
     echo -e "  ✓ Registered & started standalone ghost-support.service on port 8080"
-fi
-
-# Verification of /captcha endpoint
-sleep 2
-CAPTCHA_CHECK=$(curl -s -m 5 http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
-if [[ "$CAPTCHA_CHECK" =~ "challenge_id" ]]; then
-    echo -e "  ✓ Cryptographic Challenge Engine verified: ${GREEN}ONLINE (HTTP 200)${NC}"
-else
-    echo -e "  ${RED}⚠️ Daemon verification failed on port 8080!${NC}"
-    echo -e "  Output received: $CAPTCHA_CHECK"
-    echo -e "${YELLOW}--- Diagnostics (Service Logs) ---${NC}"
-    if [ -f "$BOT_SVC_FILE" ]; then
-        sudo journalctl -u ghost-telegram-bot -n 15 --no-pager 2>/dev/null || true
+    sleep 2
+    CAPTCHA_CHECK=$(curl -s -m 5 http://127.0.0.1:8080/captcha 2>/dev/null || echo "")
+    if [[ "$CAPTCHA_CHECK" =~ "challenge_id" ]]; then
+        echo -e "  ✓ Cryptographic Challenge Engine verified: ${GREEN}ONLINE (HTTP 200)${NC}"
+    else
+        echo -e "  ${RED}⚠️ Daemon verification failed on port 8080!${NC}"
     fi
-    if [ -f "/etc/systemd/system/ghost-support.service" ]; then
-        sudo journalctl -u ghost-support -n 15 --no-pager 2>/dev/null || true
-    fi
-    echo -e "${YELLOW}----------------------------------${NC}"
 fi
 
 # 8. Restart Ghost and clear template cache

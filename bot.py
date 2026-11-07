@@ -18,14 +18,37 @@ import re
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
-# Safe environment loading (falls back to pure Python if python-dotenv is missing)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except (ImportError, ModuleNotFoundError):
-    def _fallback_load_dotenv(path: str = ".env"):
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
+# Safe multi-location environment loading
+def load_all_environments() -> List[str]:
+    """Load configuration from all candidate .env files across common installation directories."""
+    candidates = [
+        os.getenv("GHOST_ENV_FILE", ""),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.join(os.getcwd(), ".env"),
+        "/var/www/ghost/Ghost-Restore/.env",
+        "/opt/ghost-telegram-bot/.env",
+        "/var/www/ghost/.env",
+    ]
+    seen = set()
+    valid_paths = []
+    for c in candidates:
+        if c and os.path.isfile(c):
+            real = os.path.realpath(c)
+            if real not in seen:
+                seen.add(real)
+                valid_paths.append(real)
+
+    try:
+        from dotenv import load_dotenv
+        for vp in valid_paths:
+            load_dotenv(vp, override=False)
+    except (ImportError, ModuleNotFoundError):
+        pass
+
+    # Pure Python fallback parser to ensure values are loaded even without python-dotenv
+    for vp in valid_paths:
+        try:
+            with open(vp, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#") and "=" in line:
@@ -34,8 +57,12 @@ except (ImportError, ModuleNotFoundError):
                         v = v.strip().strip("'\"")
                         if k and k not in os.environ:
                             os.environ[k] = v
-    _fallback_load_dotenv()
-    _fallback_load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+        except Exception:
+            pass
+
+    return valid_paths
+
+_loaded_env_files = load_all_environments()
 
 # Safe telegram imports (falls back gracefully if python-telegram-bot is missing)
 try:
@@ -91,7 +118,7 @@ def _parse_int(val, default=0) -> int:
         return default
 
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
 ALLOWED_USER_IDS = [
     int(uid.strip())
     for uid in os.getenv("ALLOWED_USER_IDS", "").split(",")
@@ -140,15 +167,22 @@ def find_backup_file(file_name: str) -> str:
 
 
 def _update_env_file(key_values: dict, env_path: str = None):
-    """Safely updates or appends key-value pairs in .env."""
+    """Safely updates or appends key-value pairs in .env and memory."""
     if not env_path:
-        env_path = os.path.join(os.path.dirname(__file__), ".env")
-        if not os.path.exists(env_path) and os.path.exists(".env"):
-            env_path = ".env"
+        for f in _loaded_env_files:
+            if os.path.isfile(f):
+                env_path = f
+                break
+        if not env_path:
+            env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+
+    # Update in-memory environment immediately
+    for k, v in key_values.items():
+        os.environ[str(k)] = str(v)
 
     lines = []
     if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
+        with open(env_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
     updated_keys = set()
@@ -197,12 +231,16 @@ def get_main_menu_keyboard():
 
 
 async def send_unauthorized(update: Update):
-    """Notify unauthorized user."""
+    """Notify unauthorized user with clear authorization instructions."""
     uid = update.effective_user.id if update.effective_user else "Unknown"
     text = (
         f"⛔ *Access Denied*\n\n"
-        f"Your Telegram User ID is `{uid}`.\n"
-        f"It is not present in `ALLOWED_USER_IDS` in `.env`."
+        f"Your Telegram User ID is `{uid}`.\n\n"
+        f"This bot enforces fail-closed authorization for security. To authorize your account, add your ID to `.env`:\n"
+        f"`ALLOWED_USER_IDS={uid}`\n"
+        f"`ADMIN_CHAT_ID={uid}`\n\n"
+        f"Then restart the service:\n"
+        f"`sudo systemctl restart ghost-telegram-bot`"
     )
     if update.callback_query:
         await update.callback_query.answer("⛔ Access Denied", show_alert=True)
@@ -1410,6 +1448,8 @@ def main():
         print(f"Ghost Directory:     {GHOST_DIR}")
         print(f"Backups Directory:   {BACKUPS_DIR}")
         print(f"Support REST API:    http://{SUPPORT_HOST}:{SUPPORT_PORT}")
+        if _loaded_env_files:
+            print(f"Loaded Configs:      {', '.join(_loaded_env_files)}")
         if HAS_TELEGRAM:
             print("(Add your bot token to .env to enable Telegram bot polling)")
         else:
@@ -1430,6 +1470,8 @@ def main():
             loop.run_forever()
         except KeyboardInterrupt:
             loop.run_until_complete(server.stop())
+        except Exception as e:
+            logger.error("Standalone Support API daemon error: %s", e)
         return
 
     print("==================================================")
@@ -1440,6 +1482,8 @@ def main():
     print(f"Authorized User IDs: {ALLOWED_USER_IDS or 'All Users (Open)'}")
     print(f"Admin Alert Chat ID: {ADMIN_CHAT_ID or 'Not Set'}")
     print(f"Support REST API:    http://{SUPPORT_HOST}:{SUPPORT_PORT}")
+    if _loaded_env_files:
+        print(f"Loaded Configs:      {', '.join(_loaded_env_files)}")
     print("--------------------------------------------------")
     print("Bot is starting polling...")
 
@@ -1477,7 +1521,28 @@ def main():
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    app.run_polling()
+    try:
+        app.run_polling(drop_pending_updates=True)
+    except Exception as e:
+        logger.error("Telegram bot polling stopped due to error: %s", e, exc_info=True)
+        print(f"\n[ERROR] Telegram bot polling encountered an unhandled exception: {e}")
+        print("[INFO] Fallback: Ensuring Support REST API daemon remains active on port 8080...")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        fallback_server = init_support_hub(
+            application=None,
+            ghost_dir=GHOST_DIR,
+            admin_chat_id=ADMIN_CHAT_ID,
+            port=SUPPORT_PORT,
+            host=SUPPORT_HOST
+        )
+        try:
+            loop.run_until_complete(fallback_server.start())
+            loop.run_forever()
+        except KeyboardInterrupt:
+            loop.run_until_complete(fallback_server.stop())
+        except Exception as fbe:
+            logger.error("Fallback Support API server error: %s", fbe)
 
 
 if __name__ == "__main__":
