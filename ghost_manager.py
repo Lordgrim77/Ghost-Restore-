@@ -223,6 +223,10 @@ class GhostManager:
                 database = conn.get("database", "ghost_production")
 
                 sql_dump_file = os.path.join(staging_data, "mysql_database.sql")
+                env = os.environ.copy()
+                if password:
+                    env["MYSQL_PWD"] = str(password)
+
                 dump_cmd = [
                     "mysqldump",
                     f"-h{host}",
@@ -231,14 +235,12 @@ class GhostManager:
                     "--single-transaction",
                     "--quick",
                     "--routines",
-                    "--triggers"
+                    "--triggers",
+                    database
                 ]
-                if password:
-                    dump_cmd.append(f"-p{password}")
-                dump_cmd.append(database)
 
                 with open(sql_dump_file, "w", encoding="utf-8") as out:
-                    proc = subprocess.run(dump_cmd, stdout=out, stderr=subprocess.PIPE, text=True)
+                    proc = subprocess.run(dump_cmd, stdout=out, stderr=subprocess.PIPE, text=True, env=env)
                     if proc.returncode != 0:
                         raise Exception(f"mysqldump failed: {proc.stderr}")
 
@@ -332,15 +334,19 @@ class GhostManager:
             notify("⏸️ [1/6] Gracefully stopping Ghost...")
             self.control_service("stop")
 
-            # 2. Extract Archive with Backslash Normalization
+            # 2. Extract Archive with Backslash Normalization & Zip Slip Defense
             notify("📂 [2/6] Extracting archive & normalizing paths...")
             bs = chr(92)
+            staging_real = os.path.realpath(staging_dir)
             with zipfile.ZipFile(zip_path, "r") as zf:
                 for m in zf.infolist():
                     clean_name = m.filename.replace(bs, "/").lstrip("/")
                     if not clean_name:
                         continue
-                    target = os.path.join(staging_dir, clean_name)
+                    target = os.path.realpath(os.path.join(staging_dir, clean_name))
+                    # Prevent Zip Slip directory traversal
+                    if not (target.startswith(staging_real + os.sep) or target == staging_real):
+                        continue
                     if m.is_dir() or clean_name.endswith("/"):
                         os.makedirs(target, exist_ok=True)
                     else:
@@ -431,13 +437,13 @@ class GhostManager:
                 database = conn.get("database", "ghost_production")
 
                 if os.path.exists(mysql_sql):
-                    # Direct MySQL dump import
-                    cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}"]
+                    # Direct MySQL dump import with secure password handling via env
+                    cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}", database]
+                    env = os.environ.copy()
                     if password:
-                        cmd.append(f"-p{password}")
-                    cmd.append(database)
+                        env["MYSQL_PWD"] = str(password)
                     with open(mysql_sql, "r", encoding="utf-8") as sf:
-                        proc = subprocess.run(cmd, stdin=sf, capture_output=True, text=True)
+                        proc = subprocess.run(cmd, stdin=sf, capture_output=True, text=True, env=env)
                         if proc.returncode != 0:
                             notify(f"⚠️ MySQL import notice: {proc.stderr}")
                 elif sqlite_file and os.path.exists(sqlite_file):
@@ -524,13 +530,13 @@ class GhostManager:
         sql_tmp.write("\n".join(sql_lines))
         sql_tmp.close()
 
-        cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}"]
+        cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}", database]
+        env = os.environ.copy()
         if password:
-            cmd.append(f"-p{password}")
-        cmd.append(database)
+            env["MYSQL_PWD"] = str(password)
 
         with open(sql_tmp.name, "r", encoding="utf-8") as sf:
-            subprocess.run(cmd, stdin=sf, capture_output=True, text=True)
+            subprocess.run(cmd, stdin=sf, capture_output=True, text=True, env=env)
         os.remove(sql_tmp.name)
 
     def list_backups(self):
@@ -792,11 +798,11 @@ class GhostManager:
             database = conn.get("database", "ghost_production")
 
             def run_mysql_query(sql):
-                cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}"]
+                cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}", "-D", database, "-B", "-e", sql]
+                env = os.environ.copy()
                 if password:
-                    cmd.append(f"-p{password}")
-                cmd.extend(["-D", database, "-B", "-e", sql])
-                res = subprocess.run(cmd, capture_output=True, text=True)
+                    env["MYSQL_PWD"] = str(password)
+                res = subprocess.run(cmd, capture_output=True, text=True, env=env)
                 if res.returncode != 0:
                     return []
                 lines = res.stdout.split("\n")
@@ -981,6 +987,10 @@ class GhostManager:
                 database = conn.get("database", "ghost_production")
 
                 sql_dump_file = os.path.join(db_dir, "ghost_database.sql")
+                env = os.environ.copy()
+                if password:
+                    env["MYSQL_PWD"] = str(password)
+
                 dump_cmd = [
                     "mysqldump",
                     f"-h{host}",
@@ -989,14 +999,12 @@ class GhostManager:
                     "--single-transaction",
                     "--quick",
                     "--routines",
-                    "--triggers"
+                    "--triggers",
+                    database
                 ]
-                if password:
-                    dump_cmd.append(f"-p{password}")
-                dump_cmd.append(database)
 
                 with open(sql_dump_file, "w", encoding="utf-8") as out:
-                    proc = subprocess.run(dump_cmd, stdout=out, stderr=subprocess.PIPE, text=True)
+                    proc = subprocess.run(dump_cmd, stdout=out, stderr=subprocess.PIPE, text=True, env=env)
                     if proc.returncode != 0:
                         raise Exception(f"mysqldump failed: {proc.stderr}")
 
@@ -1178,12 +1186,12 @@ class GhostManager:
                 database = conn.get("database", "ghost_production")
 
                 if os.path.exists(sql_file):
-                    cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}"]
+                    cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}", database]
+                    env = os.environ.copy()
                     if password:
-                        cmd.append(f"-p{password}")
-                    cmd.append(database)
+                        env["MYSQL_PWD"] = str(password)
                     with open(sql_file, "r", encoding="utf-8") as sf:
-                        proc = subprocess.run(cmd, stdin=sf, capture_output=True, text=True)
+                        proc = subprocess.run(cmd, stdin=sf, capture_output=True, text=True, env=env)
                         if proc.returncode != 0:
                             notify(f"⚠️ MySQL import notice: {proc.stderr}")
                 elif os.path.exists(sqlite_file):

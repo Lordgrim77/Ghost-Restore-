@@ -279,7 +279,8 @@ class SupportVault:
     def list_member_cases(self, member_email: str, member_uuid: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         clean_email = (member_email or "").strip().lower()
         clean_uuid = (member_uuid or "").strip()
-        if not clean_email and not clean_uuid:
+        # Security: Mandate private member_uuid to prevent unauthenticated case enumeration by email alone
+        if not clean_uuid:
             return []
 
         seen_codes = set()
@@ -288,27 +289,16 @@ class SupportVault:
             try:
                 with sqlite3.connect(db) as conn:
                     conn.row_factory = sqlite3.Row
-                    if clean_email and clean_uuid:
+                    if clean_email:
                         rows = conn.execute(
                             """
                             SELECT case_code, access_key, category, priority, status, subject,
                                    description, reporter_alias, created_at, updated_at
                             FROM cases
-                            WHERE LOWER(member_email) = ? OR member_uuid = ?
+                            WHERE member_uuid = ? AND LOWER(member_email) = ?
                             ORDER BY id DESC LIMIT ?
                             """,
-                            (clean_email, clean_uuid, limit)
-                        ).fetchall()
-                    elif clean_email:
-                        rows = conn.execute(
-                            """
-                            SELECT case_code, access_key, category, priority, status, subject,
-                                   description, reporter_alias, created_at, updated_at
-                            FROM cases
-                            WHERE LOWER(member_email) = ?
-                            ORDER BY id DESC LIMIT ?
-                            """,
-                            (clean_email, limit)
+                            (clean_uuid, clean_email, limit)
                         ).fetchall()
                     else:
                         rows = conn.execute(
@@ -357,6 +347,18 @@ class SupportVault:
         clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_name)
         if not clean_name or clean_name.startswith('.'):
             clean_name = f"evidence_{clean_name}"
+
+        # Defuse dangerous executable extensions (SEC-05)
+        DANGEROUS_EXTS = {
+            '.exe', '.bat', '.cmd', '.sh', '.bash', '.bin', '.phtml', '.php',
+            '.pl', '.py', '.cgi', '.msi', '.vbs', '.scr', '.ps1', '.jar',
+            '.html', '.htm', '.xhtml', '.svg'
+        }
+        root_name, ext = os.path.splitext(clean_name)
+        if ext.lower() in DANGEROUS_EXTS:
+            clean_name = f"{root_name}_{ext.lstrip('.')}.blocked"
+            mime_type = "application/octet-stream"
+
         stored_name = f"{case_code}_{uuid.uuid4().hex[:8]}_{clean_name}"
         stored_path = os.path.join(self.evidence_dir, stored_name)
 
@@ -392,11 +394,13 @@ class SupportVault:
         }
 
     def get_evidence_path(self, stored_filename: str) -> Optional[str]:
+        # Guard against path traversal in stored_filename
+        clean_stored = os.path.basename(stored_filename)
         candidates = [
-            os.path.join(self.evidence_dir, stored_filename),
-            os.path.join("/var/www/ghost/support_vault/evidence", stored_filename),
-            os.path.join("/opt/ghost-telegram-bot/support_vault/evidence", stored_filename),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "support_vault", "evidence", stored_filename)
+            os.path.join(self.evidence_dir, clean_stored),
+            os.path.join("/var/www/ghost/support_vault/evidence", clean_stored),
+            os.path.join("/opt/ghost-telegram-bot/support_vault/evidence", clean_stored),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "support_vault", "evidence", clean_stored)
         ]
         for c in candidates:
             if os.path.exists(c) and os.path.isfile(c):
@@ -1208,8 +1212,8 @@ class SupportApiServer:
             if content_len > 0:
                 body = await reader.readexactly(content_len)
 
-            # Client IP
-            client_ip = headers.get('x-forwarded-for', '').split(',')[0].strip() or headers.get('x-real-ip', '127.0.0.1')
+            # Client IP: Prioritize trusted X-Real-IP set by Nginx socket, fallback to X-Forwarded-For
+            client_ip = headers.get('x-real-ip', '').strip() or headers.get('x-forwarded-for', '').split(',')[0].strip() or '127.0.0.1'
             ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
 
             # Route handling
@@ -1376,8 +1380,9 @@ class SupportApiServer:
             elif method == "GET" and route_path in ("/member/cases", "/cases/member"):
                 m_email = query.get("email", "").strip().lower()
                 m_uuid = query.get("uuid", "").strip()
-                if not m_email and not m_uuid:
-                    await self._send_response(writer, 400, {"error": "Email or member UUID required."})
+                # Security: Require private member UUID to prevent unauthorized email enumeration (SEC-03)
+                if not m_uuid:
+                    await self._send_response(writer, 401, {"error": "Authentication required: Valid member UUID session identifier is missing."})
                     return
 
                 cases = self.vault.list_member_cases(member_email=m_email, member_uuid=m_uuid)

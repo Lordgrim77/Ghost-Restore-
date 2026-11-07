@@ -111,9 +111,13 @@ ghost_mgr = GhostManager(ghost_dir=GHOST_DIR, backups_dir=BACKUPS_DIR)
 
 
 def is_authorized(user_id: int) -> bool:
-    """Check if the requesting user ID is authorized."""
+    """Check if the requesting user ID is authorized (fails closed for security)."""
     if not ALLOWED_USER_IDS and not ADMIN_CHAT_ID:
-        return True
+        logger.warning(
+            "Access denied for user %s: ALLOWED_USER_IDS and ADMIN_CHAT_ID are not set in .env. Failing closed for security.",
+            user_id
+        )
+        return False
     if ADMIN_CHAT_ID and user_id == ADMIN_CHAT_ID:
         return True
     return user_id in ALLOWED_USER_IDS

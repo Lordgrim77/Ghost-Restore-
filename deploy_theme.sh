@@ -34,10 +34,13 @@ echo -e "${BLUE}[2/6] Unpacking cleanly into $THEME_DIR...${NC}"
 sudo find "$THEME_DIR" -type f -name "*\\*" -delete 2>/dev/null || true
 sudo python3 -c "
 import zipfile, os
+theme_real = os.path.realpath('$THEME_DIR')
 with zipfile.ZipFile('/tmp/alto-theme-latest.zip', 'r') as zf:
     for item in zf.infolist():
         clean_name = item.filename.replace('\\\\', '/').lstrip('/')
-        target_path = os.path.join('$THEME_DIR', clean_name)
+        target_path = os.path.realpath(os.path.join('$THEME_DIR', clean_name))
+        if not (target_path.startswith(theme_real + os.sep) or target_path == theme_real):
+            continue
         if item.is_dir() or clean_name.endswith('/'):
             os.makedirs(target_path, exist_ok=True)
         else:
