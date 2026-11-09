@@ -344,18 +344,7 @@ import sys, re, os, glob, subprocess
 
 conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/nginx/conf.d"]
 csp_map_path = "/etc/nginx/conf.d/ghost-csp-map.conf"
-tls_harden_path = "/etc/nginx/conf.d/ghost-tls-harden.conf"
 sec_snippet_path = "/etc/nginx/snippets/ghost-security-headers.conf"
-
-tls_harden_content = """# Ghost TLS Protocol & Cipher Hardening
-# Deprecate insecure TLSv1.0 & TLSv1.1; enforce TLSv1.2 and TLSv1.3 only
-ssl_protocols TLSv1.2 TLSv1.3;
-ssl_prefer_server_ciphers off;
-ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
-ssl_session_timeout 1d;
-ssl_session_cache shared:SSL:10m;
-ssl_session_tickets off;
-"""
 
 csp_map_content = """# Ghost CMS & Support Portal Route-Aware Content-Security-Policy Map
 map $request_uri $ghost_csp {
@@ -466,7 +455,37 @@ if os.path.isdir("/etc/nginx"):
     created_files = []
     changed = False
 
-    for aux_path, aux_body in [(csp_map_path, csp_map_content), (tls_harden_path, tls_harden_content), (sec_snippet_path, sec_snippet_content)]:
+    # Clean up conflicting /etc/nginx/conf.d/ghost-tls-harden.conf if present
+    stale_tls_conf = "/etc/nginx/conf.d/ghost-tls-harden.conf"
+    if os.path.isfile(stale_tls_conf):
+        try:
+            os.remove(stale_tls_conf)
+            changed = True
+        except OSError:
+            pass
+
+    # Harden global ssl_protocols in /etc/nginx/nginx.conf (TLS 1.2 & TLS 1.3 only, zero duplicate directives)
+    nginx_conf_path = "/etc/nginx/nginx.conf"
+    if os.path.isfile(nginx_conf_path):
+        try:
+            with open(nginx_conf_path, "r", encoding="utf-8", errors="ignore") as fp:
+                old_nconf = fp.read()
+            new_nconf, n_count = re.subn(
+                r'^[ \t]*ssl_protocols\s+[^;\n]*\b(?:TLSv1(?!\.[2-9])|TLSv1\.0|TLSv1\.1)\b[^\n]*',
+                '	ssl_protocols TLSv1.2 TLSv1.3;',
+                old_nconf,
+                flags=re.M
+            )
+            if n_count > 0 and new_nconf != old_nconf:
+                backups[nginx_conf_path] = old_nconf
+                with open(nginx_conf_path, "w", encoding="utf-8") as fp:
+                    fp.write(new_nconf)
+                changed = True
+                print("  ✓ Hardened /etc/nginx/nginx.conf: enforced ssl_protocols TLSv1.2 TLSv1.3")
+        except Exception as exc:
+            print(f"  Note: nginx.conf TLS hardening skipped ({exc})")
+
+    for aux_path, aux_body in [(csp_map_path, csp_map_content), (sec_snippet_path, sec_snippet_content)]:
         os.makedirs(os.path.dirname(aux_path), exist_ok=True)
         if os.path.isfile(aux_path):
             old_aux = open(aux_path, "r", encoding="utf-8", errors="ignore").read()
