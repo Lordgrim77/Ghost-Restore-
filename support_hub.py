@@ -1994,6 +1994,8 @@ class SupportApiServer:
             "Expires: 0",
             "X-Content-Type-Options: nosniff",
             "X-Frame-Options: DENY",
+            "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'",
+            "Permissions-Policy: camera=(), microphone=(), geolocation=()",
             "Referrer-Policy: no-referrer",
             "Access-Control-Allow-Methods: GET, POST, OPTIONS",
             "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key",

@@ -308,19 +308,34 @@ sudo systemctl restart ghost-telegram-bot
 
 ---
 
-### Nginx Reverse Proxy Configuration
+### Nginx Reverse Proxy & CSP Security Headers Configuration
 
-The Support Portal submits tickets and fetches correspondence via `/api/support/`. Add this block inside your Ghost server configuration in `/etc/nginx/sites-available/` (before the main `location /` block):
+Both `install.sh` and `deploy_theme.sh` automatically configure:
+1. `/etc/nginx/conf.d/ghost-csp-map.conf` — Route-aware `Content-Security-Policy` map (full CSP on public & `/support/` pages while keeping `/ghost/` Admin SPA editor & previews compatible).
+2. `/etc/nginx/snippets/ghost-security-headers.conf` — Included directly inside `location /` so Ghost's `add_header` rules never strip `Strict-Transport-Security`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`, or `Content-Security-Policy`.
+3. `location /api/support/` — Reverse proxy to `127.0.0.1:8080` with single-header `X-Frame-Options: DENY` and `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
+
+If configuring manually in `/etc/nginx/sites-available/`:
 
 ```nginx
-# Ghost Support Portal & Telegram Bot API Proxy
+# Ghost Support Portal & Telegram Bot API Proxy (place before location /)
 location /api/support/ {
     proxy_pass http://127.0.0.1:8080/;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     client_max_body_size 50M;
+}
+
+location / {
+    include snippets/ghost-security-headers.conf;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Host $http_host;
+    proxy_pass http://127.0.0.1:2368;
 }
 ```
 

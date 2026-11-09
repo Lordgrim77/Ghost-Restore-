@@ -40,18 +40,18 @@ window.GHOST_MEMBER = {
 
                 <!-- Navigation Tabs (Submit Report | My Cases | Track by Code) -->
                 <div class="gm-support-tabs">
-                    <button type="button" class="gm-support-tab active" id="tabBtnSubmit" onclick="switchSupportTab('submit')">
+                    <button type="button" class="gm-support-tab active" id="tabBtnSubmit" data-support-tab="submit">
                         <span class="gm-tab-icon">📝</span>
                         <span>Submit Report</span>
                     </button>
                     {{#if @member}}
-                    <button type="button" class="gm-support-tab" id="tabBtnMyCases" onclick="switchSupportTab('mycases')">
+                    <button type="button" class="gm-support-tab" id="tabBtnMyCases" data-support-tab="mycases">
                         <span class="gm-tab-icon">📁</span>
                         <span>My Cases</span>
                         <span class="gm-tab-badge" id="myCasesBadge" style="display:none;">0</span>
                     </button>
                     {{/if}}
-                    <button type="button" class="gm-support-tab" id="tabBtnTrack" onclick="switchSupportTab('track')">
+                    <button type="button" class="gm-support-tab" id="tabBtnTrack" data-support-tab="track">
                         <span class="gm-tab-icon">🔍</span>
                         <span>Track by Code</span>
                         <span class="gm-tab-badge" id="activeCaseBadge" style="display:none;">Active</span>
@@ -62,7 +62,7 @@ window.GHOST_MEMBER = {
                 <!-- TAB 1: NEW CASE SUBMISSION FORM -->
                 <!-- ============================================================= -->
                 <div class="gm-support-panel active" id="panelSubmit">
-                    <form id="gmSupportForm" class="gm-support-form" onsubmit="handleCaseSubmit(event)">
+                    <form id="gmSupportForm" class="gm-support-form">
                         
                         <!-- Member Logged-In Notice -->
                         {{#if @member}}
@@ -114,8 +114,8 @@ window.GHOST_MEMBER = {
                         <!-- Evidence File Dropzone -->
                         <div class="gm-form-group">
                             <label class="gm-form-label">Evidence &amp; Attachments (Optional)</label>
-                            <div class="gm-dropzone" id="gmDropzone" onclick="document.getElementById('evidenceFileInput').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleFileDrop(event)">
-                                <input type="file" id="evidenceFileInput" multiple style="display:none;" onchange="handleFileSelect(event)" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.log,.mp4,.zip">
+                            <div class="gm-dropzone" id="gmDropzone">
+                                <input type="file" id="evidenceFileInput" multiple style="display:none;" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt,.log,.mp4,.zip">
                                 <div class="gm-dropzone-content">
                                     <div class="gm-dropzone-icon">
                                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -136,7 +136,7 @@ window.GHOST_MEMBER = {
                             {{#if @member}}
                             <!-- Member Anonymity Option -->
                             <label class="gm-checkbox-label">
-                                <input type="checkbox" id="anonToggle" onchange="toggleMemberAnon(this.checked)">
+                                <input type="checkbox" id="anonToggle" data-anon-mode="member">
                                 <span class="gm-custom-checkbox"></span>
                                 <span class="gm-checkbox-text">
                                     <strong>Submit Anonymously</strong>
@@ -146,7 +146,7 @@ window.GHOST_MEMBER = {
                             {{else}}
                             <!-- Non-Member Optional Contact -->
                             <label class="gm-checkbox-label">
-                                <input type="checkbox" id="anonToggle" checked onchange="toggleAnonFields(this.checked)">
+                                <input type="checkbox" id="anonToggle" checked data-anon-mode="guest">
                                 <span class="gm-custom-checkbox"></span>
                                 <span class="gm-checkbox-text">
                                     <strong>Remain Strictly Anonymous</strong>
@@ -174,7 +174,7 @@ window.GHOST_MEMBER = {
                                 <div class="gm-captcha-visual" id="gmCaptchaVisual">
                                     <span class="gm-captcha-loading">Loading challenge...</span>
                                 </div>
-                                <button type="button" class="gm-captcha-refresh-btn" onclick="refreshCaptcha()" title="Refresh Challenge">
+                                <button type="button" class="gm-captcha-refresh-btn" id="btnRefreshCaptcha" title="Refresh Challenge">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <polyline points="23 4 23 10 17 10"></polyline>
                                         <polyline points="1 20 1 14 7 14"></polyline>
@@ -221,23 +221,23 @@ window.GHOST_MEMBER = {
                                 <span class="gm-credential-label">CASE REFERENCE CODE</span>
                                 <div class="gm-credential-value">
                                     <code id="resCaseCode">---</code>
-                                    <button type="button" class="gm-copy-btn" onclick="copyText('resCaseCode')">Copy</button>
+                                    <button type="button" class="gm-copy-btn" data-copy-target="resCaseCode">Copy</button>
                                 </div>
                             </div>
                             <div class="gm-credential-item">
                                 <span class="gm-credential-label">PRIVATE ACCESS KEY</span>
                                 <div class="gm-credential-value">
                                     <code id="resAccessKey">---</code>
-                                    <button type="button" class="gm-copy-btn" onclick="copyText('resAccessKey')">Copy</button>
+                                    <button type="button" class="gm-copy-btn" data-copy-target="resAccessKey">Copy</button>
                                 </div>
                             </div>
                         </div>
 
                         <div class="gm-success-actions">
-                            <button type="button" class="gm-copy-link-btn" id="btnSuccessCopyLink" onclick="copyDirectCaseLink()">
+                            <button type="button" class="gm-copy-link-btn" id="btnSuccessCopyLink">
                                 <span>🔗 Copy Direct Case Link</span>
                             </button>
-                            <button type="button" class="gm-view-case-btn" onclick="openActiveCaseDashboard()">
+                            <button type="button" class="gm-view-case-btn" id="btnOpenActiveCase">
                                 <span>Open Case Dashboard &amp; Live Chat</span> →
                             </button>
                         </div>
@@ -258,7 +258,7 @@ window.GHOST_MEMBER = {
                                     Track reports and access live chat with administrators.
                                 </p>
                             </div>
-                            <button type="button" class="gm-refresh-btn" onclick="fetchMemberCases()" id="btnRefreshCases">
+                            <button type="button" class="gm-refresh-btn" id="btnRefreshCases">
                                 <span>🔄 Refresh</span>
                             </button>
                         </div>
@@ -276,7 +276,7 @@ window.GHOST_MEMBER = {
                             <p class="gm-empty-desc" id="myCasesEmptyDesc">
                                 You haven't submitted any cases with this account yet.
                             </p>
-                            <button type="button" class="gm-empty-cta" onclick="switchSupportTab('submit')">
+                            <button type="button" class="gm-empty-cta" data-support-tab="submit">
                                 <span>Submit a Report Now</span> →
                             </button>
                         </div>
@@ -309,7 +309,7 @@ window.GHOST_MEMBER = {
                         </div>
 
                         <div class="gm-lookup-actions">
-                            <button type="button" class="gm-lookup-btn" onclick="loadCaseFromInputs()">
+                            <button type="button" class="gm-lookup-btn" id="btnLookupCase">
                                 <span>Access Case &amp; Live Chat</span> →
                             </button>
                         </div>
@@ -328,7 +328,7 @@ window.GHOST_MEMBER = {
                                     <span class="gm-alias-badge" id="dashReporter" style="display:none;"></span>
                                 </div>
                                 <div class="gm-summary-actions">
-                                    <button type="button" class="gm-action-btn" id="btnCopyCaseLink" onclick="copyCaseDirectLink()" title="Copy direct link to access this case">
+                                    <button type="button" class="gm-action-btn" id="btnCopyCaseLink" title="Copy direct link to access this case">
                                         <span id="copyCaseLinkIcon">🔗</span> <span id="copyCaseLinkText">Copy Direct Link</span>
                                     </button>
                                     <div class="gm-summary-time" id="dashCreatedAt">Submitted: Recently</div>
@@ -385,7 +385,7 @@ window.GHOST_MEMBER = {
                                     <span class="gm-chat-title">Case Communication Stream</span>
                                 </div>
                                 <div style="display:flex;align-items:center;gap:10px;">
-                                    <button type="button" class="gm-chat-export-btn" onclick="exportChatTranscript()" title="Download conversation history transcript">
+                                    <button type="button" class="gm-chat-export-btn" id="btnExportTranscript" title="Download conversation history transcript">
                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                             <polyline points="7 10 12 15 17 10"></polyline>
@@ -404,14 +404,14 @@ window.GHOST_MEMBER = {
                             </div>
 
                             <!-- Composer with Attachment -->
-                            <form id="gmChatComposer" class="gm-chat-composer" onsubmit="handleSendMessage(event)">
+                            <form id="gmChatComposer" class="gm-chat-composer">
                                 <div class="gm-chat-attach-preview" id="chatAttachPreview" style="display:none;">
                                     <span>📎 <span id="chatAttachName">file.png</span></span>
-                                    <button type="button" class="gm-attach-preview-remove" onclick="removeChatAttachment()" title="Remove file">✕</button>
+                                    <button type="button" class="gm-attach-preview-remove" id="btnRemoveChatAttach" title="Remove file">✕</button>
                                 </div>
                                 <div class="gm-composer-input-row">
                                     <label class="gm-chat-file-btn" title="Attach screenshot or document">
-                                        <input type="file" id="chatFileInput" style="display:none;" onchange="handleChatFileSelect(this)">
+                                        <input type="file" id="chatFileInput" style="display:none;">
                                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
                                         </svg>
@@ -2253,7 +2253,7 @@ html.light-mode .gm-evidence-meta code {
             }
         } else {
             console.error('[Support Hub] Failed to fetch captcha challenge:', lastError);
-            visual.innerHTML = '<span class="gm-captcha-error">Failed to load challenge. <a href="javascript:void(0)" onclick="fetchCaptcha()" style="color:inherit;text-decoration:underline;margin-left:4px;">Tap refresh</a></span>';
+            visual.innerHTML = '<span class="gm-captcha-error">Failed to load challenge. <button type="button" class="gm-captcha-retry-btn" data-action="refresh-captcha" style="background:none;border:none;padding:0;color:inherit;font:inherit;cursor:pointer;text-decoration:underline;margin-left:4px;">Tap refresh</button></span>';
         }
     }
 
@@ -2389,7 +2389,7 @@ html.light-mode .gm-evidence-meta code {
             return `
                 <div class="gm-file-item">
                     <span>📄 <strong>${escapeHtml(f.name)}</strong> (${sizeKb} KB)</span>
-                    <button type="button" class="gm-file-remove" onclick="removeFile(${i})">✕</button>
+                    <button type="button" class="gm-file-remove" data-remove-file="${i}">✕</button>
                 </div>
             `;
         }).join('');
@@ -2600,7 +2600,7 @@ html.light-mode .gm-evidence-meta code {
                     <h4 class="gm-case-card-subject">${escapeHtml(c.subject || 'No Subject')}</h4>
                     <p class="gm-case-card-desc">${escapeHtml(c.description || '')}</p>
                     <div class="gm-case-card-actions">
-                        <button type="button" class="gm-open-case-btn" data-case-code="${escapeHtml(code)}" data-access-key="${escapeHtml(accessKey)}" onclick="openCaseFromList(this.getAttribute('data-case-code'), this.getAttribute('data-access-key'))">
+                        <button type="button" class="gm-open-case-btn" data-case-code="${escapeHtml(code)}" data-access-key="${escapeHtml(accessKey)}">
                             <span>Open Case &amp; Live Chat →</span>
                         </button>
                     </div>
@@ -3043,6 +3043,117 @@ html.light-mode .gm-evidence-meta code {
 
     // Remove any canvas on support page
     
+
+    // Bind all DOM event listeners cleanly (zero inline event attributes or script URIs)
+    function bindPortalEventListeners() {
+        document.querySelectorAll('[data-support-tab]').forEach(btn => {
+            btn.addEventListener('click', function() {
+                switchSupportTab(this.getAttribute('data-support-tab'));
+            });
+        });
+
+        const supportForm = document.getElementById('gmSupportForm');
+        if (supportForm) supportForm.addEventListener('submit', handleCaseSubmit);
+
+        const chatForm = document.getElementById('gmChatComposer');
+        if (chatForm) chatForm.addEventListener('submit', handleSendMessage);
+
+        const dropzone = document.getElementById('gmDropzone');
+        const evidenceInput = document.getElementById('evidenceFileInput');
+        if (dropzone) {
+            dropzone.addEventListener('click', function(e) {
+                if (evidenceInput && e.target !== evidenceInput) {
+                    evidenceInput.click();
+                }
+            });
+            dropzone.addEventListener('dragover', handleDragOver);
+            dropzone.addEventListener('dragleave', handleDragLeave);
+            dropzone.addEventListener('drop', handleFileDrop);
+        }
+        if (evidenceInput) evidenceInput.addEventListener('change', handleFileSelect);
+
+        const anonToggle = document.getElementById('anonToggle');
+        if (anonToggle) {
+            anonToggle.addEventListener('change', function() {
+                if (this.getAttribute('data-anon-mode') === 'member') {
+                    toggleMemberAnon(this.checked);
+                } else {
+                    toggleAnonFields(this.checked);
+                }
+            });
+        }
+
+        const btnRefreshCaptcha = document.getElementById('btnRefreshCaptcha');
+        if (btnRefreshCaptcha) btnRefreshCaptcha.addEventListener('click', refreshCaptcha);
+
+        const captchaVisual = document.getElementById('gmCaptchaVisual');
+        if (captchaVisual) {
+            captchaVisual.addEventListener('click', function(e) {
+                const retryBtn = e.target.closest('[data-action="refresh-captcha"]');
+                if (retryBtn) refreshCaptcha();
+            });
+        }
+
+        document.querySelectorAll('[data-copy-target]').forEach(btn => {
+            btn.addEventListener('click', function() {
+                copyText(this.getAttribute('data-copy-target'));
+            });
+        });
+
+        const btnSuccessCopyLink = document.getElementById('btnSuccessCopyLink');
+        if (btnSuccessCopyLink) btnSuccessCopyLink.addEventListener('click', copyDirectCaseLink);
+
+        const btnOpenActiveCase = document.getElementById('btnOpenActiveCase');
+        if (btnOpenActiveCase) btnOpenActiveCase.addEventListener('click', openActiveCaseDashboard);
+
+        const btnRefreshCases = document.getElementById('btnRefreshCases');
+        if (btnRefreshCases) btnRefreshCases.addEventListener('click', fetchMemberCases);
+
+        const btnLookupCase = document.getElementById('btnLookupCase');
+        if (btnLookupCase) btnLookupCase.addEventListener('click', loadCaseFromInputs);
+
+        const btnCopyCaseLink = document.getElementById('btnCopyCaseLink');
+        if (btnCopyCaseLink) btnCopyCaseLink.addEventListener('click', copyCaseDirectLink);
+
+        const btnExportTranscript = document.getElementById('btnExportTranscript');
+        if (btnExportTranscript) btnExportTranscript.addEventListener('click', exportChatTranscript);
+
+        const btnRemoveChatAttach = document.getElementById('btnRemoveChatAttach');
+        if (btnRemoveChatAttach) btnRemoveChatAttach.addEventListener('click', removeChatAttachment);
+
+        const chatFileInput = document.getElementById('chatFileInput');
+        if (chatFileInput) {
+            chatFileInput.addEventListener('change', function() {
+                handleChatFileSelect(this);
+            });
+        }
+
+        const gmFileList = document.getElementById('gmFileList');
+        if (gmFileList) {
+            gmFileList.addEventListener('click', function(e) {
+                const rmBtn = e.target.closest('[data-remove-file]');
+                if (rmBtn) {
+                    const idx = parseInt(rmBtn.getAttribute('data-remove-file'), 10);
+                    if (!Number.isNaN(idx)) removeFile(idx);
+                }
+            });
+        }
+
+        const myCasesList = document.getElementById('myCasesList');
+        if (myCasesList) {
+            myCasesList.addEventListener('click', function(e) {
+                const openBtn = e.target.closest('.gm-open-case-btn');
+                if (openBtn) {
+                    openCaseFromList(
+                        openBtn.getAttribute('data-case-code') || '',
+                        openBtn.getAttribute('data-access-key') || ''
+                    );
+                }
+            });
+        }
+    }
+
+    bindPortalEventListeners();
 
     // Initialize state
     if (window.GHOST_MEMBER && window.GHOST_MEMBER.loggedIn) {

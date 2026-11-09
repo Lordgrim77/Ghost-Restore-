@@ -337,12 +337,34 @@ if os.path.isfile(config_path):
         print(f"  Note: Database sync skipped ({e})")
 PYEOF
 
-# 6. Configure Nginx Reverse Proxy for /api/support/
-echo -e "${BLUE}[6/8] Ensuring Nginx reverse proxy is configured for /api/support/...${NC}"
-sudo python3 - <<'PYEOF' 2>/dev/null || true
-import sys, re, os, glob
+# 6. Configure Nginx Reverse Proxy, Route-Aware CSP & Security Headers
+echo -e "${BLUE}[6/8] Configuring Nginx /api/support/ proxy, route-aware CSP & security headers...${NC}"
+sudo python3 - <<'PYEOF' || true
+import sys, re, os, glob, subprocess
 
 conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/nginx/conf.d"]
+csp_map_path = "/etc/nginx/conf.d/ghost-csp-map.conf"
+sec_snippet_path = "/etc/nginx/snippets/ghost-security-headers.conf"
+
+csp_map_content = """# Ghost CMS & Support Portal Route-Aware Content-Security-Policy Map
+map $request_uri $ghost_csp {
+    ~^/ghost/ "frame-ancestors 'self'; base-uri 'self'; object-src 'none'";
+    default   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; worker-src 'self' blob:; upgrade-insecure-requests";
+}
+"""
+
+sec_snippet_content = """# Ghost CMS & Support Portal Hardened Security Headers (included inside location /)
+proxy_hide_header X-Frame-Options;
+proxy_hide_header X-Content-Type-Options;
+proxy_hide_header Content-Security-Policy;
+add_header Content-Security-Policy $ghost_csp always;
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(self)" always;
+"""
+
 proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
     location /api/support/ {
         proxy_pass http://127.0.0.1:8080/;
@@ -350,45 +372,150 @@ proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
         client_max_body_size 50M;
-    }
+    }"""
 
-"""
+def find_matching_brace(text: str, open_idx: int) -> int:
+    depth = 0
+    in_quote = None
+    in_comment = False
+    i = open_idx
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if in_comment:
+            if ch == "\n":
+                in_comment = False
+        elif in_quote:
+            if ch == "\\" and i + 1 < n:
+                i += 1
+            elif ch == in_quote:
+                in_quote = None
+        else:
+            if ch == "#":
+                in_comment = True
+            elif ch in ('"', "'"):
+                in_quote = ch
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+    return -1
 
-seen_files = set()
-patched = False
+def patch_vhost_text(content: str) -> str:
+    out = content
+    # 1. Ensure or upgrade location /api/support/
+    sup_matches = list(re.finditer(r"(^[ \t]*#[^\n]*Support Portal[^\n]*\n)?[ \t]*location\s+/api/support/\s*\{", out, flags=re.M))
+    if sup_matches:
+        for m in reversed(sup_matches):
+            brace_idx = out.find("{", m.start())
+            close_idx = find_matching_brace(out, brace_idx)
+            if close_idx != -1:
+                block_slice = out[m.start():close_idx + 1]
+                if "Strict-Transport-Security" not in block_slice:
+                    out = out[:m.start()] + proxy_block + out[close_idx + 1:]
+    else:
+        loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
+        for m in reversed(loc_matches):
+            brace_idx = out.find("{", m.start())
+            close_idx = find_matching_brace(out, brace_idx)
+            if close_idx != -1 and "2368" in out[brace_idx:close_idx + 1]:
+                out = out[:m.start()] + proxy_block + "\n\n" + out[m.start():]
 
-for cdir in conf_dirs:
-    if not os.path.isdir(cdir):
-        continue
-    for f in sorted(glob.glob(os.path.join(cdir, "*"))):
-        real_f = os.path.realpath(f)
-        if not os.path.isfile(real_f) or real_f.endswith(".bak") or real_f in seen_files:
+    # 2. Inject snippets/ghost-security-headers.conf inside location / blocks proxying to 2368
+    loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
+    for m in reversed(loc_matches):
+        brace_idx = out.find("{", m.start())
+        close_idx = find_matching_brace(out, brace_idx)
+        if close_idx == -1:
             continue
-        seen_files.add(real_f)
-        try:
-            with open(real_f, "r", encoding="utf-8", errors="ignore") as fp:
-                content = fp.read()
-            if "2368" in content and "location /api/support/" not in content:
-                parts = re.split(r"(\s+location\s+/\s*\{)", content)
-                if len(parts) > 1:
+        inner = out[brace_idx + 1:close_idx]
+        if "2368" not in inner:
+            continue
+        new_inner = re.sub(
+            r"^([ \t]*)(add_header\s+(?:X-Content-Type-Options|X-Frame-Options|Strict-Transport-Security|Content-Security-Policy)\b[^;\n]*;)",
+            r"\1# [managed by ghost-security-headers.conf] \2",
+            inner,
+            flags=re.M | re.I,
+        )
+        if "snippets/ghost-security-headers.conf" not in new_inner:
+            new_inner = "\n        include snippets/ghost-security-headers.conf;" + new_inner
+        if new_inner != inner:
+            out = out[:brace_idx + 1] + new_inner + out[close_idx:]
+    return out
+
+if os.path.isdir("/etc/nginx"):
+    backups = {}
+    created_files = []
+    changed = False
+
+    for aux_path, aux_body in [(csp_map_path, csp_map_content), (sec_snippet_path, sec_snippet_content)]:
+        os.makedirs(os.path.dirname(aux_path), exist_ok=True)
+        if os.path.isfile(aux_path):
+            old_aux = open(aux_path, "r", encoding="utf-8", errors="ignore").read()
+            if old_aux != aux_body:
+                backups[aux_path] = old_aux
+                with open(aux_path, "w", encoding="utf-8") as fp:
+                    fp.write(aux_body)
+                changed = True
+        else:
+            created_files.append(aux_path)
+            with open(aux_path, "w", encoding="utf-8") as fp:
+                fp.write(aux_body)
+            changed = True
+
+    seen_files = set()
+    for cdir in conf_dirs:
+        if not os.path.isdir(cdir):
+            continue
+        for f in sorted(glob.glob(os.path.join(cdir, "*"))):
+            real_f = os.path.realpath(f)
+            if (
+                not os.path.isfile(real_f)
+                or real_f.endswith(".bak")
+                or real_f in seen_files
+                or os.path.basename(real_f) == "ghost-csp-map.conf"
+            ):
+                continue
+            seen_files.add(real_f)
+            try:
+                with open(real_f, "r", encoding="utf-8", errors="ignore") as fp:
+                    content = fp.read()
+                if "2368" not in content:
+                    continue
+                patched_content = patch_vhost_text(content)
+                if patched_content != content:
+                    backups[real_f] = content
                     with open(real_f + ".bak", "w", encoding="utf-8") as bkp:
                         bkp.write(content)
-                    new_parts = []
-                    for p in parts:
-                        if re.match(r"^\s+location\s+/\s*\{", p):
-                            new_parts.append("\n" + proxy_block + p)
-                        else:
-                            new_parts.append(p)
                     with open(real_f, "w", encoding="utf-8") as fp:
-                        fp.write("".join(new_parts))
-                    print(f"  ✓ Patched Nginx: {f}")
-                    patched = True
-        except Exception:
-            pass
+                        fp.write(patched_content)
+                    print(f"  ✓ Patched Nginx proxy & CSP headers in: {f}")
+                    changed = True
+            except Exception as exc:
+                print(f"  ⚠️ Skipped {f}: {exc}")
 
-if patched:
-    os.system("nginx -t >/dev/null 2>&1 && systemctl reload nginx")
+    if changed:
+        chk = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
+        if chk.returncode == 0:
+            subprocess.run(["systemctl", "reload", "nginx"], check=False)
+            print("  ✓ Nginx CSP & security headers verified (nginx -t) and reloaded.")
+        else:
+            print(f"  ⚠️ nginx -t reported an issue ({chk.stderr.strip()}); rolling back Nginx edits...")
+            for bpath, btext in backups.items():
+                with open(bpath, "w", encoding="utf-8") as fp:
+                    fp.write(btext)
+            for cpath in created_files:
+                try:
+                    os.remove(cpath)
+                except OSError:
+                    pass
+    else:
+        print("  ✓ Nginx proxy & CSP headers already up to date.")
 PYEOF
 
 # 7. Update Support Hub Daemon & Cryptographic Engine
