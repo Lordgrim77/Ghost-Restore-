@@ -24,7 +24,7 @@ A production-ready suite for Ghost CMS publications featuring:
   - [Option A: 1-Click Interactive Automated Installer (Recommended)](#option-a-1-click-interactive-automated-installer-recommended)
   - [Option B: Manual Bot Installation](#option-b-manual-bot-installation)
   - [Configuration Reference (.env)](#configuration-reference-env)
-  - [Nginx Reverse Proxy Configuration](#nginx-reverse-proxy-configuration)
+  - [Nginx Reverse Proxy, TLS & CSP Security Hardening](#nginx-reverse-proxy-tls--csp-security-hardening)
   - [Service Management Commands](#service-management-commands)
   - [How Backup & Restore Works](#how-backup--restore-works)
 - [📂 Repository File Structure](#-repository-file-structure)
@@ -308,12 +308,18 @@ sudo systemctl restart ghost-telegram-bot
 
 ---
 
-### Nginx Reverse Proxy & CSP Security Headers Configuration
+### Nginx Reverse Proxy, TLS & CSP Security Hardening
 
-Both `install.sh` and `deploy_theme.sh` automatically configure:
-1. `/etc/nginx/conf.d/ghost-csp-map.conf` — Route-aware `Content-Security-Policy` map (full CSP on public & `/support/` pages while keeping `/ghost/` Admin SPA editor & previews compatible).
-2. `/etc/nginx/snippets/ghost-security-headers.conf` — Included directly inside `location /` so Ghost's `add_header` rules never strip `Strict-Transport-Security`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`, or `Content-Security-Policy`.
-3. `location /api/support/` — Reverse proxy to `127.0.0.1:8080` with single-header `X-Frame-Options: DENY` and `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
+Both `install.sh` and `deploy_theme.sh` automatically configure enterprise-grade Nginx security files:
+1. `/etc/nginx/conf.d/ghost-tls-harden.conf` — **TLS 1.2 & TLS 1.3 Hardening**: Explicitly enforces `ssl_protocols TLSv1.2 TLSv1.3;`, deprecating legacy, vulnerable TLS 1.0 and TLS 1.1 protocols. Configures secure AEAD forward-secrecy cipher suites (`ECDHE-ECDSA-AES128-GCM-SHA256`, `ECDHE-RSA-AES128-GCM-SHA256`, etc.) and session cache isolation.
+2. `/etc/nginx/conf.d/ghost-csp-map.conf` — **Route-Aware Content-Security-Policy**: Defines tailored CSP rules for public pages vs `/ghost/` admin. Directives avoid broad wildcards (`*` or wildcard `https:`), allowlist specific CDNs (Unsplash, Ghost CDN, Gravatar, Bunny Fonts, Stripe, YouTube, Vimeo), and declare `trusted-types default;`.
+3. `/etc/nginx/snippets/ghost-security-headers.conf` — Included directly inside `location /` so Ghost CMS never overrides or drops security headers. Concurrently emits both enforced `Content-Security-Policy` and `Content-Security-Policy-Report-Only` headers with telemetry reporting to `report-uri /api/support/csp-report`.
+4. **CSP Violation Telemetry Ingestion**: The background daemon (`support_hub.py`) provides `POST /api/support/csp-report` with strict IP rate limiting (60 req/min). Violation reports are securely logged to `/opt/ghost-telegram-bot/support_vault/csp_violations.log` (mode `0600`) for real-time monitoring and auditing.
+5. **Trusted Types DOM XSS Protection**: The theme (`default.hbs`) includes a synchronous bootstrap policy (`window.trustedTypes.createPolicy('default', ...)`) ensuring full compatibility with Ghost Portal, Koenig cards, and Sodo Search without DOM XSS regressions.
+6. `location /api/support/` — Reverse proxy to `127.0.0.1:8080` with single-header `X-Frame-Options: DENY` and `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
+
+> [!NOTE]
+> If your publication domain is proxied through Cloudflare, also verify in your **Cloudflare Dashboard** under **SSL/TLS → Edge Certificates** that **Minimum TLS Version** is configured to **TLS 1.2**.
 
 If configuring manually in `/etc/nginx/sites-available/`:
 

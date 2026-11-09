@@ -210,12 +210,23 @@ if not os.path.isdir("/etc/nginx"):
 
 conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/nginx/conf.d"]
 csp_map_path = "/etc/nginx/conf.d/ghost-csp-map.conf"
+tls_harden_path = "/etc/nginx/conf.d/ghost-tls-harden.conf"
 sec_snippet_path = "/etc/nginx/snippets/ghost-security-headers.conf"
+
+tls_harden_content = """# Ghost TLS Protocol & Cipher Hardening
+# Deprecate insecure TLSv1.0 & TLSv1.1; enforce TLSv1.2 and TLSv1.3 only
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+ssl_session_timeout 1d;
+ssl_session_cache shared:SSL:10m;
+ssl_session_tickets off;
+"""
 
 csp_map_content = """# Ghost CMS & Support Portal Route-Aware Content-Security-Policy Map
 map $request_uri $ghost_csp {
     ~^/ghost/ "frame-ancestors 'self'; base-uri 'self'; object-src 'none'";
-    default   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; worker-src 'self' blob:; upgrade-insecure-requests";
+    default   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://images.unsplash.com https://static.ghost.org https://gravatar.com https://*.gravatar.com https://cdn.jsdelivr.net https://*.wp.com https://*.googleusercontent.com; media-src 'self' blob: https://www.youtube.com https://player.vimeo.com https://t.me; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; worker-src 'self' blob:; trusted-types default; upgrade-insecure-requests";
 }
 """
 
@@ -223,7 +234,9 @@ sec_snippet_content = """# Ghost CMS & Support Portal Hardened Security Headers 
 proxy_hide_header X-Frame-Options;
 proxy_hide_header X-Content-Type-Options;
 proxy_hide_header Content-Security-Policy;
-add_header Content-Security-Policy $ghost_csp always;
+proxy_hide_header Content-Security-Policy-Report-Only;
+add_header Content-Security-Policy "$ghost_csp; report-uri /api/support/csp-report" always;
+add_header Content-Security-Policy-Report-Only "$ghost_csp; report-uri /api/support/csp-report" always;
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 add_header X-Frame-Options "SAMEORIGIN" always;
 add_header X-Content-Type-Options "nosniff" always;
@@ -316,7 +329,7 @@ backups = {}
 created_files = []
 found_vhost = False
 
-for aux_path, aux_body in [(csp_map_path, csp_map_content), (sec_snippet_path, sec_snippet_content)]:
+for aux_path, aux_body in [(csp_map_path, csp_map_content), (tls_harden_path, tls_harden_content), (sec_snippet_path, sec_snippet_content)]:
     os.makedirs(os.path.dirname(aux_path), exist_ok=True)
     if os.path.isfile(aux_path):
         old_aux = open(aux_path, "r", encoding="utf-8", errors="ignore").read()
@@ -339,7 +352,7 @@ for cdir in conf_dirs:
             not os.path.isfile(real_f)
             or real_f.endswith(".bak")
             or real_f in seen_files
-            or os.path.basename(real_f) == "ghost-csp-map.conf"
+            or os.path.basename(real_f) in ("ghost-csp-map.conf", "ghost-tls-harden.conf")
         ):
             continue
         seen_files.add(real_f)

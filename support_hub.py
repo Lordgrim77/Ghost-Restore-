@@ -1637,6 +1637,32 @@ class SupportApiServer:
                 return
 
             # -------------------------------------------------------------
+            # POST /csp-report (CSP Violation Telemetry Ingestion)
+            # -------------------------------------------------------------
+            elif method == "POST" and route_path in ("/csp-report", "/csp-reports", "/report"):
+                if self._check_rate_limit("csp_report", client_ip, max_hits=60, window_sec=60):
+                    await self._send_response(writer, 429, {"error": "Too many reports."}, req_origin=req_origin)
+                    return
+                try:
+                    report_obj = json.loads(body.decode("utf-8", errors="ignore") or "{}")
+                    violations_log = os.path.join(self.vault.vault_dir, "csp_violations.log")
+                    log_entry = {
+                        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "ip_hash": ip_hash,
+                        "report": report_obj
+                    }
+                    with open(violations_log, "a", encoding="utf-8") as vf:
+                        vf.write(json.dumps(log_entry) + "\n")
+                    try:
+                        os.chmod(violations_log, 0o600)
+                    except OSError:
+                        pass
+                except Exception as err:
+                    logger.debug("CSP report parsing error: %s", err)
+                await self._send_response(writer, 204, None, req_origin=req_origin)
+                return
+
+            # -------------------------------------------------------------
             # POST /cases (Case Submission - JSON or Multipart)
             # -------------------------------------------------------------
             elif method == "POST" and route_path == "/cases":
