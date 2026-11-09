@@ -28,8 +28,9 @@ import struct
 import asyncio
 import logging
 import urllib.parse
+import urllib.request
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Set, Callable
 from email import policy
 from email.parser import BytesParser
 
@@ -72,12 +73,14 @@ logger = logging.getLogger("support-hub")
 # =========================================================================
 
 def strip_jpeg_exif(data: bytes) -> bytes:
-    """Strip EXIF (APP1), FlashPix/ICC (APP2), and comment markers from JPEG bytes."""
+    """Strip EXIF/XMP/GPS (APP1), IPTC (APP13), non-essential APPn, and COM markers from JPEG bytes."""
     if not data.startswith(b'\xff\xd8'):
         return data
     out = [b'\xff\xd8']
     idx = 2
     length = len(data)
+    # Preserve JFIF (0xFFE0) and ICC profile (0xFFE2); drop APP1, APP3..APP15, and COM (0xFFFE)
+    drop_markers = {b'\xff\xe1', b'\xff\xfe'} | {bytes([0xff, m]) for m in range(0xe3, 0xf0)}
     while idx < length:
         if data[idx] != 0xff:
             out.append(data[idx:])
@@ -90,12 +93,17 @@ def strip_jpeg_exif(data: bytes) -> bytes:
             out.append(marker)
             idx += 2
             continue
+        if marker == b'\xff\xda':  # Start of Scan — remaining bytes are compressed image stream
+            out.append(data[idx:])
+            break
         if idx + 4 > length:
             out.append(data[idx:])
             break
         seg_len = int.from_bytes(data[idx+2:idx+4], 'big')
-        # Drop APP1 (0xFFE1: EXIF/GPS/XMP) and COM (0xFFFE: Comments)
-        if marker not in (b'\xff\xe1', b'\xff\xfe'):
+        if seg_len < 2 or idx + 2 + seg_len > length:
+            out.append(data[idx:])
+            break
+        if marker not in drop_markers:
             out.append(data[idx:idx+2+seg_len])
         idx += 2 + seg_len
     return b''.join(out)
@@ -122,13 +130,44 @@ def strip_png_metadata(data: bytes) -> bytes:
     return b''.join(out)
 
 
+def strip_webp_metadata(data: bytes) -> bytes:
+    """Strip EXIF and XMP RIFF chunks from WebP images."""
+    if len(data) < 12 or data[:4] != b'RIFF' or data[8:12] != b'WEBP':
+        return data
+    chunks: List[bytes] = []
+    idx = 12
+    length = len(data)
+    drop_fourcc = {b'EXIF', b'XMP '}
+    while idx + 8 <= length:
+        fourcc = data[idx:idx+4]
+        chunk_size = struct.unpack('<I', data[idx+4:idx+8])[0]
+        padded_size = chunk_size + (chunk_size & 1)
+        end_idx = idx + 8 + padded_size
+        if end_idx > length:
+            chunks.append(data[idx:])
+            break
+        if fourcc not in drop_fourcc:
+            if fourcc == b'VP8X' and chunk_size >= 10:
+                payload = bytearray(data[idx+8:idx+8+chunk_size])
+                payload[0] &= ~(0x08 | 0x04)
+                pad = b'\x00' if (chunk_size & 1) else b''
+                chunks.append(fourcc + struct.pack('<I', chunk_size) + bytes(payload) + pad)
+            else:
+                chunks.append(data[idx:end_idx])
+        idx = end_idx
+    body = b'WEBP' + b''.join(chunks)
+    return b'RIFF' + struct.pack('<I', len(body)) + body
+
+
 def sanitize_media(filename: str, data: bytes) -> bytes:
     """Sanitize file data according to its extension."""
     ext = os.path.splitext(filename)[1].lower()
-    if ext in ('.jpg', '.jpeg'):
+    if ext in ('.jpg', '.jpeg') or data.startswith(b'\xff\xd8'):
         return strip_jpeg_exif(data)
-    elif ext == '.png':
+    elif ext == '.png' or data.startswith(b'\x89PNG\r\n\x1a\n'):
         return strip_png_metadata(data)
+    elif ext == '.webp' or (len(data) >= 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP'):
+        return strip_webp_metadata(data)
     return data
 
 
@@ -137,12 +176,31 @@ def sanitize_media(filename: str, data: bytes) -> bytes:
 # =========================================================================
 
 class SupportVault:
+    ALLOWED_EVIDENCE_EXTS: Set[str] = {
+        '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic', '.heif',
+        '.pdf', '.txt', '.log', '.csv', '.json', '.eml',
+        '.mp4', '.mov', '.webm', '.mp3', '.wav', '.ogg', '.m4a', '.zip'
+    }
+
     def __init__(self, ghost_dir: str):
+        self.ghost_dir = ghost_dir
         self.vault_dir = os.path.join(ghost_dir, "support_vault")
         self.evidence_dir = os.path.join(self.vault_dir, "evidence")
         self.db_path = os.path.join(self.vault_dir, "support_cases.db")
-        os.makedirs(self.evidence_dir, exist_ok=True)
+        os.makedirs(self.vault_dir, mode=0o700, exist_ok=True)
+        os.makedirs(self.evidence_dir, mode=0o700, exist_ok=True)
+        for dpath in (self.vault_dir, self.evidence_dir):
+            try:
+                os.chmod(dpath, 0o700)
+            except Exception:
+                pass
         self._init_db()
+        for fpath in (self.db_path, f"{self.db_path}-wal", f"{self.db_path}-shm"):
+            if os.path.exists(fpath):
+                try:
+                    os.chmod(fpath, 0o600)
+                except Exception:
+                    pass
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -279,8 +337,8 @@ class SupportVault:
     def list_member_cases(self, member_email: str, member_uuid: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         clean_email = (member_email or "").strip().lower()
         clean_uuid = (member_uuid or "").strip()
-        # Security: Mandate private member_uuid to prevent unauthenticated case enumeration by email alone
-        if not clean_uuid:
+        # Security: Mandate BOTH verified member_uuid and member_email; never expose access_key in bulk lists
+        if not clean_uuid or not clean_email:
             return []
 
         seen_codes = set()
@@ -289,28 +347,16 @@ class SupportVault:
             try:
                 with sqlite3.connect(db) as conn:
                     conn.row_factory = sqlite3.Row
-                    if clean_email:
-                        rows = conn.execute(
-                            """
-                            SELECT case_code, access_key, category, priority, status, subject,
-                                   description, reporter_alias, created_at, updated_at
-                            FROM cases
-                            WHERE member_uuid = ? AND LOWER(member_email) = ?
-                            ORDER BY id DESC LIMIT ?
-                            """,
-                            (clean_uuid, clean_email, limit)
-                        ).fetchall()
-                    else:
-                        rows = conn.execute(
-                            """
-                            SELECT case_code, access_key, category, priority, status, subject,
-                                   description, reporter_alias, created_at, updated_at
-                            FROM cases
-                            WHERE member_uuid = ?
-                            ORDER BY id DESC LIMIT ?
-                            """,
-                            (clean_uuid, limit)
-                        ).fetchall()
+                    rows = conn.execute(
+                        """
+                        SELECT case_code, category, priority, status, subject,
+                               description, reporter_alias, created_at, updated_at
+                        FROM cases
+                        WHERE member_uuid = ? AND LOWER(member_email) = ?
+                        ORDER BY id DESC LIMIT ?
+                        """,
+                        (clean_uuid, clean_email, limit)
+                    ).fetchall()
 
                     for r in rows:
                         d = dict(r)
@@ -324,6 +370,14 @@ class SupportVault:
         return member_cases[:limit]
 
     def _candidate_dbs(self) -> List[str]:
+        default_dirs = {
+            os.path.abspath("/var/www/ghost"),
+            os.path.abspath("/opt/ghost-telegram-bot"),
+            os.path.abspath(os.path.dirname(os.path.abspath(__file__))),
+        }
+        if os.path.abspath(self.ghost_dir) not in default_dirs:
+            return [self.db_path]
+
         candidates = [
             self.db_path,
             "/var/www/ghost/support_vault/support_cases.db",
@@ -343,20 +397,16 @@ class SupportVault:
     def save_evidence(self, case_code: str, filename: str, data: bytes, mime_type: Optional[str] = None) -> Dict[str, Any]:
         clean_data = sanitize_media(filename, data)
         sha256 = hashlib.sha256(clean_data).hexdigest()
-        raw_name = os.path.basename(filename)
-        clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_name)
+        raw_name = os.path.basename(filename or "evidence")
+        clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_name)[:120]
         if not clean_name or clean_name.startswith('.'):
             clean_name = f"evidence_{clean_name}"
 
-        # Defuse dangerous executable extensions (SEC-05)
-        DANGEROUS_EXTS = {
-            '.exe', '.bat', '.cmd', '.sh', '.bash', '.bin', '.phtml', '.php',
-            '.pl', '.py', '.cgi', '.msi', '.vbs', '.scr', '.ps1', '.jar',
-            '.html', '.htm', '.xhtml', '.svg'
-        }
+        # Enforce strict evidence extension allowlist (MED-05 / SEC-05)
         root_name, ext = os.path.splitext(clean_name)
-        if ext.lower() in DANGEROUS_EXTS:
-            clean_name = f"{root_name}_{ext.lstrip('.')}.blocked"
+        if not ext or ext.lower() not in self.ALLOWED_EVIDENCE_EXTS:
+            ext_label = ext.lstrip('.') or 'bin'
+            clean_name = f"{root_name[:96]}_{ext_label}.blocked"
             mime_type = "application/octet-stream"
 
         stored_name = f"{case_code}_{uuid.uuid4().hex[:8]}_{clean_name}"
@@ -365,7 +415,7 @@ class SupportVault:
         with open(stored_path, "wb") as f:
             f.write(clean_data)
         try:
-            os.chmod(stored_path, 0o664)
+            os.chmod(stored_path, 0o600)
         except Exception:
             pass
 
@@ -520,16 +570,44 @@ class SupportVault:
 # =========================================================================
 
 class SupportBotBridge:
-    def __init__(self, application: Optional[Application], vault: SupportVault, admin_chat_id: int):
+    def __init__(
+        self,
+        application: Optional[Application],
+        vault: SupportVault,
+        admin_chat_id: int,
+        allowed_user_ids: Optional[Set[int]] = None,
+        auth_callback: Optional[Callable[[int], bool]] = None,
+    ):
         self.app = application
         self.vault = vault
         self.admin_chat_id = admin_chat_id
+        self.auth_callback = auth_callback
+        if allowed_user_ids is not None:
+            self.allowed_user_ids: Set[int] = set(allowed_user_ids)
+        elif admin_chat_id and admin_chat_id > 0:
+            # Positive Telegram chat IDs correspond to individual user accounts; negative IDs are group/channel chats
+            self.allowed_user_ids = {int(admin_chat_id)}
+        else:
+            self.allowed_user_ids = set()
         # In-memory mapping of active admin reply sessions: admin_id -> case_code
         self.active_reply_sessions: Dict[int, str] = {}
         # In-memory mapping of telegram message_id -> case_code
         self.msg_to_case: Dict[int, str] = {}
         if self.app and HAS_TELEGRAM:
             self._register_handlers()
+
+    def _is_authorized_user(self, user_id: Optional[int]) -> bool:
+        """Fail-closed authorization check on all SupportBotBridge handlers (CRIT-01)."""
+        if user_id is None:
+            return False
+        if self.auth_callback is not None:
+            try:
+                return bool(self.auth_callback(user_id))
+            except Exception:
+                return False
+        if not self.allowed_user_ids:
+            return False
+        return user_id in self.allowed_user_ids
 
     def _register_handlers(self):
         if not HAS_TELEGRAM or not self.app:
@@ -741,6 +819,14 @@ class SupportBotBridge:
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
+        caller_id = query.from_user.id if (query and query.from_user) else (update.effective_user.id if update.effective_user else None)
+        if not self._is_authorized_user(caller_id):
+            if query:
+                try:
+                    await query.answer("⛔ Access Denied.", show_alert=True)
+                except Exception:
+                    pass
+            return
         try:
             await query.answer()
         except Exception:
@@ -940,10 +1026,12 @@ class SupportBotBridge:
                 pass
 
     async def handle_admin_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not update.message:
+        if not update.message or not update.effective_user:
             return
 
         user_id = update.effective_user.id
+        if not self._is_authorized_user(user_id):
+            return
         reply_to = update.message.reply_to_message
         case_code = None
 
@@ -1015,6 +1103,11 @@ class SupportBotBridge:
 
     async def cases_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """List active cases."""
+        caller_id = update.effective_user.id if update.effective_user else None
+        if not self._is_authorized_user(caller_id):
+            if update.message:
+                await update.message.reply_text("⛔ Access Denied.")
+            return
         cases = self.vault.list_recent_cases(limit=10)
         if not cases:
             await update.message.reply_text("ℹ️ No support cases currently on record.")
@@ -1035,7 +1128,12 @@ class SupportBotBridge:
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
     async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
+        caller_id = update.effective_user.id if update.effective_user else None
+        if not self._is_authorized_user(caller_id):
+            if update.message:
+                await update.message.reply_text("⛔ Access Denied.")
+            return
+        user_id = caller_id
         if user_id in self.active_reply_sessions:
             del self.active_reply_sessions[user_id]
             await update.message.reply_text("✓ Active reply session canceled.")
@@ -1056,22 +1154,118 @@ class CaptchaEngine:
     """
     Self-contained, privacy-preserving anti-flooding challenge engine:
     1. Cryptographic HMAC signature ensuring tokens cannot be forged.
-    2. Dynamic math/visual challenge to defeat simple scripted bots.
+    2. Vector-path visual math challenge (zero <text> / ASCII digits in SVG DOM, shuffled glyph order).
     3. Client-side SHA-256 Proof-of-Work (PoW) difficulty requiring computational work
        before requests are admitted, neutralizing DDoS/flood scripts.
     4. Anti-replay token tracking with memory-capped sliding expiration.
     """
+    GLYPH_STROKES: Dict[str, List[Tuple[float, float, float, float]]] = {
+        '0': [(0, 0, 10, 0), (10, 0, 10, 16), (10, 16, 0, 16), (0, 16, 0, 0)],
+        '1': [(2, 3, 5, 0), (5, 0, 5, 16), (1, 16, 9, 16)],
+        '2': [(0, 0, 10, 0), (10, 0, 10, 8), (10, 8, 0, 8), (0, 8, 0, 16), (0, 16, 10, 16)],
+        '3': [(0, 0, 10, 0), (10, 0, 10, 16), (0, 8, 10, 8), (0, 16, 10, 16)],
+        '4': [(0, 0, 0, 8), (0, 8, 10, 8), (10, 0, 10, 16)],
+        '5': [(10, 0, 0, 0), (0, 0, 0, 8), (0, 8, 10, 8), (10, 8, 10, 16), (10, 16, 0, 16)],
+        '6': [(10, 0, 0, 0), (0, 0, 0, 16), (0, 16, 10, 16), (10, 16, 10, 8), (10, 8, 0, 8)],
+        '7': [(0, 0, 10, 0), (10, 0, 3, 16)],
+        '8': [(0, 0, 10, 0), (10, 0, 10, 16), (10, 16, 0, 16), (0, 16, 0, 0), (0, 8, 10, 8)],
+        '9': [(10, 8, 0, 8), (0, 8, 0, 0), (0, 0, 10, 0), (10, 0, 10, 16), (10, 16, 0, 16)],
+        '+': [(5, 3, 5, 13), (0, 8, 10, 8)],
+        '-': [(1, 8, 9, 8)],
+        '=': [(1, 5, 9, 5), (1, 11, 9, 11)],
+        '?': [(0, 3, 0, 0), (0, 0, 10, 0), (10, 0, 10, 7), (10, 7, 5, 9), (5, 9, 5, 12), (5, 15, 5, 16.5)],
+    }
+
     def __init__(self, secret_key: Optional[str] = None):
         self.secret_key = secret_key or secrets.token_hex(32)
-        # Store spent or issued challenges: challenge_id -> expiry_timestamp
+        # Store spent challenges: challenge_id -> expiry_timestamp
         self.spent_tokens: Dict[str, float] = {}
-        self.difficulty = 4  # Requires hash beginning with '0000' (~0.05s-0.25s client-side)
+        self.max_spent_tokens = 10000
+        self.difficulty = 4  # Requires hash beginning with '0000' (~0.1s-0.4s client-side)
 
     def _cleanup_expired(self):
         now = time.time()
         expired = [cid for cid, exp in self.spent_tokens.items() if exp < now]
         for cid in expired:
             self.spent_tokens.pop(cid, None)
+        if len(self.spent_tokens) > self.max_spent_tokens:
+            # Evict oldest expiry entries if memory cap is exceeded
+            oldest = sorted(self.spent_tokens.items(), key=lambda kv: kv[1])[: len(self.spent_tokens) - self.max_spent_tokens]
+            for cid, _ in oldest:
+                self.spent_tokens.pop(cid, None)
+
+    @staticmethod
+    def _jitter() -> float:
+        return (secrets.randbelow(121) - 60) / 100.0  # [-0.60, +0.60]
+
+    def _render_vector_svg(self, expr: str) -> str:
+        svg_w, svg_h = 176, 44
+        chars = [ch for ch in expr]
+        # Compute x positions for non-space glyphs
+        positioned: List[Tuple[float, str]] = []
+        cursor_x = 14.0
+        for ch in chars:
+            if ch == ' ':
+                cursor_x += 7.0
+                continue
+            positioned.append((cursor_x, ch))
+            cursor_x += 15.5
+
+        # Center horizontally
+        total_span = max(cursor_x - 14.0, 1.0)
+        offset_x = max((svg_w - total_span) / 2.0, 8.0)
+
+        # Shuffle DOM emission order so glyph sequence cannot be inferred from element index
+        indices = list(range(len(positioned)))
+        for i in range(len(indices) - 1, 0, -1):
+            j = secrets.randbelow(i + 1)
+            indices[i], indices[j] = indices[j], indices[i]
+
+        glyph_elems: List[str] = []
+        for idx in indices:
+            gx, ch = positioned[idx]
+            strokes = self.GLYPH_STROKES.get(ch, [])
+            if not strokes:
+                continue
+            px = offset_x + (gx - 14.0) + self._jitter()
+            py = 14.0 + self._jitter() * 1.5
+            rot = (secrets.randbelow(13) - 6)  # [-6, +6] deg
+            d_parts: List[str] = []
+            # Shuffle individual strokes within each glyph as well
+            s_order = list(strokes)
+            for si in range(len(s_order) - 1, 0, -1):
+                sj = secrets.randbelow(si + 1)
+                s_order[si], s_order[sj] = s_order[sj], s_order[si]
+            for (x1, y1, x2, y2) in s_order:
+                jx1 = round(x1 + self._jitter() * 0.65, 2)
+                jy1 = round(y1 + self._jitter() * 0.65, 2)
+                jx2 = round(x2 + self._jitter() * 0.65, 2)
+                jy2 = round(y2 + self._jitter() * 0.65, 2)
+                d_parts.append(f"M {jx1} {jy1} L {jx2} {jy2}")
+            d_str = " ".join(d_parts)
+            glyph_elems.append(
+                f'<g transform="translate({px:.1f},{py:.1f}) rotate({rot},5,8)">'
+                f'<path d="{d_str}" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+                f'</g>'
+            )
+
+        # Decoy interference curves
+        decoys: List[str] = []
+        for _ in range(5):
+            x0, y0 = secrets.randbelow(30) + 4, secrets.randbelow(36) + 4
+            cx, cy = secrets.randbelow(100) + 35, secrets.randbelow(40) + 2
+            x1, y1 = secrets.randbelow(40) + 132, secrets.randbelow(36) + 4
+            decoys.append(
+                f'<path d="M {x0} {y0} Q {cx} {cy}, {x1} {y1}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1.3"/>'
+            )
+
+        return (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" style="user-select:none;border-radius:8px;">'
+            f'<rect width="100%" height="100%" fill="rgba(15,23,42,0.95)" rx="8" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>'
+            + "".join(decoys)
+            + "".join(glyph_elems)
+            + '</svg>'
+        )
 
     def generate_challenge(self) -> Dict[str, Any]:
         self._cleanup_expired()
@@ -1084,27 +1278,18 @@ class CaptchaEngine:
         op = secrets.choice(["+", "-"])
         if op == "+":
             ans = str(num1 + num2)
-            question = f"{num1} + {num2}"
+            question = f"{num1} + {num2} = ?"
         else:
             if num1 < num2:
                 num1, num2 = num2, num1
             ans = str(num1 - num2)
-            question = f"{num1} - {num2}"
+            question = f"{num1} - {num2} = ?"
 
         # Sign the challenge parameters: challenge_id, timestamp, ans, difficulty
         sig_payload = f"{challenge_id}:{timestamp}:{ans}:{self.difficulty}"
         signature = hmac.new(self.secret_key.encode('utf-8'), sig_payload.encode('utf-8'), hashlib.sha256).hexdigest()
 
-        # Dynamic SVG puzzle
-        svg_w, svg_h = 160, 44
-        svg_markup = (
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" style="user-select:none;border-radius:8px;">'
-            f'<rect width="100%" height="100%" fill="rgba(15,23,42,0.95)" rx="8" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>'
-            f'<path d="M 10 32 Q 40 8, 80 22 T 150 12" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>'
-            f'<path d="M 5 15 Q 50 35, 100 15 T 155 30" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>'
-            f'<text x="50%" y="28" font-family="monospace, monospace" font-size="19" font-weight="bold" fill="#ffffff" text-anchor="middle" letter-spacing="3">{question} = ?</text>'
-            f'</svg>'
-        )
+        svg_markup = self._render_vector_svg(question)
 
         return {
             "challenge_id": challenge_id,
@@ -1152,6 +1337,12 @@ class CaptchaEngine:
 
 
 class SupportApiServer:
+    MAX_BODY_BYTES = 50 * 1024 * 1024  # 50 MB hard payload cap
+    LARGE_UPLOAD_THRESHOLD = 2 * 1024 * 1024  # 2 MB concurrency gate
+    MAX_HEADER_COUNT = 64
+    MAX_HEADER_LINE_BYTES = 8192
+    MAX_FILES_PER_CASE = 15
+
     def __init__(self, vault: SupportVault, bridge: SupportBotBridge, host: str = "127.0.0.1", port: int = 8080):
         self.vault = vault
         self.bridge = bridge
@@ -1159,23 +1350,150 @@ class SupportApiServer:
         self.port = port
         self.server: Optional[asyncio.Server] = None
         self.captcha = CaptchaEngine()
-        # IP Rate Limiting (in-memory sliding window): ip -> [timestamp, timestamp]
-        self.ip_submissions: Dict[str, List[float]] = {}
+        self._conn_sem = asyncio.Semaphore(32)
+        self._upload_sem = asyncio.Semaphore(2)
+        # Bounded sliding-window rate-limit buckets: bucket_name -> {key -> [timestamps]}
+        self._rate_buckets: Dict[str, Dict[str, List[float]]] = {}
+        self._ghost_port, self._ghost_origin, self._ghost_host, self._ghost_proto = self._load_ghost_upstream_config()
 
-    def _is_rate_limited(self, ip: str) -> bool:
-        now = datetime.datetime.now().timestamp()
-        window = 3600  # 1 hour
-        max_submissions = 6
-        timestamps = [t for t in self.ip_submissions.get(ip, []) if now - t < window]
-        if len(timestamps) >= max_submissions:
+    def _load_ghost_upstream_config(self) -> Tuple[int, str, str, str]:
+        """Discover local Ghost port and configured public URL origin from config.*.json."""
+        candidates = [
+            os.path.join(self.vault.ghost_dir, "config.production.json"),
+            os.path.join(self.vault.ghost_dir, "config.development.json"),
+            "/var/www/ghost/config.production.json",
+        ]
+        for cfg_path in candidates:
+            if os.path.isfile(cfg_path):
+                try:
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    port = int(cfg.get("server", {}).get("port", 2368) or 2368)
+                    raw_url = str(cfg.get("url", "") or "").strip().rstrip("/")
+                    if raw_url:
+                        parsed = urllib.parse.urlparse(raw_url)
+                        origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+                        host_hdr = parsed.netloc or "localhost"
+                        proto_hdr = parsed.scheme or "https"
+                        return port, origin, host_hdr, proto_hdr
+                except Exception:
+                    pass
+        return 2368, "", "localhost", "https"
+
+    def _check_rate_limit(self, bucket: str, key: str, max_hits: int, window_sec: float) -> bool:
+        """Return True if key is rate-limited in bucket; enforces memory bounds (HIGH-02 / MED-08)."""
+        now = time.time()
+        store = self._rate_buckets.setdefault(bucket, {})
+        timestamps = [t for t in store.get(key, []) if now - t < window_sec]
+        if not timestamps:
+            store.pop(key, None)
+        if len(timestamps) >= max_hits:
+            store[key] = timestamps
             return True
         timestamps.append(now)
-        self.ip_submissions[ip] = timestamps
+        store[key] = timestamps
+
+        # Periodic eviction to bound dictionary size
+        if len(store) > 5000:
+            stale_keys = [k for k, ts_list in store.items() if not ts_list or (now - ts_list[-1] >= window_sec)]
+            for k in stale_keys:
+                store.pop(k, None)
+            if len(store) > 5000:
+                oldest_keys = sorted(store.keys(), key=lambda k: store[k][-1])[: len(store) - 4000]
+                for k in oldest_keys:
+                    store.pop(k, None)
         return False
+
+    def _is_rate_limited(self, ip: str) -> bool:
+        return self._check_rate_limit("create_case", ip, max_hits=6, window_sec=3600)
+
+    def _extract_client_ip(self, writer: asyncio.StreamWriter, headers: Dict[str, str]) -> str:
+        """Extract client IP safely without trusting spoofed leftmost X-Forwarded-For values (MED-08)."""
+        peer = writer.get_extra_info("peername")
+        peer_ip = str(peer[0]) if isinstance(peer, tuple) and peer else "127.0.0.1"
+        is_loopback_peer = peer_ip in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+        if not is_loopback_peer:
+            return peer_ip
+        real_ip = headers.get("x-real-ip", "").strip()
+        if real_ip:
+            return real_ip
+        xff = headers.get("x-forwarded-for", "").strip()
+        if xff:
+            # Rightmost entry is appended by local trusted reverse proxy ($proxy_add_x_forwarded_for)
+            return xff.split(",")[-1].strip() or peer_ip
+        return peer_ip
+
+    async def _verify_ghost_member_cookie(self, cookie_header: str) -> Optional[Dict[str, str]]:
+        """Verify Ghost member SSR session cookie against local Ghost /members/api/member/ (HIGH-01)."""
+        if not cookie_header or "ghost-members-ssr" not in cookie_header:
+            return None
+
+        def _query_ghost() -> Optional[Dict[str, str]]:
+            url = f"http://127.0.0.1:{self._ghost_port}/members/api/member/"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Cookie": cookie_header,
+                    "Host": self._ghost_host,
+                    "X-Forwarded-Proto": self._ghost_proto,
+                    "Accept": "application/json",
+                },
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=4.0) as resp:
+                    if resp.status != 200:
+                        return None
+                    raw = resp.read(65536)
+                    if not raw:
+                        return None
+                    data = json.loads(raw.decode("utf-8", errors="replace"))
+                    m_uuid = str(data.get("uuid") or "").strip()
+                    m_email = str(data.get("email") or "").strip().lower()
+                    m_name = str(data.get("name") or "").strip()
+                    if m_uuid and m_email:
+                        return {"uuid": m_uuid, "email": m_email, "name": m_name}
+            except Exception:
+                return None
+            return None
+
+        return await asyncio.to_thread(_query_ghost)
+
+    async def _is_case_authorized(self, case_data: Dict[str, Any], provided_key: str, cookie_header: str) -> bool:
+        """Constant-time access_key check with verified Ghost member session fallback (HIGH-01 / MED-06)."""
+        stored_key = str(case_data.get("access_key") or "")
+        if provided_key and stored_key and hmac.compare_digest(stored_key.encode("utf-8"), provided_key.encode("utf-8")):
+            return True
+        # Allow authenticated Ghost member to access their own linked case without exposing access_key in bulk lists
+        case_uuid = str(case_data.get("member_uuid") or "").strip()
+        case_email = str(case_data.get("member_email") or "").strip().lower()
+        if case_uuid and case_email and cookie_header:
+            verified = await self._verify_ghost_member_cookie(cookie_header)
+            if verified:
+                uuid_ok = hmac.compare_digest(case_uuid.encode("utf-8"), verified["uuid"].encode("utf-8"))
+                email_ok = hmac.compare_digest(case_email.encode("utf-8"), verified["email"].encode("utf-8"))
+                if uuid_ok and email_ok:
+                    return True
+        return False
+
+    def _resolve_cors_origin(self, request_origin: str) -> Optional[str]:
+        if not request_origin:
+            return None
+        clean_origin = request_origin.strip().rstrip("/")
+        allowed = set()
+        if self._ghost_origin:
+            allowed.add(self._ghost_origin)
+        allowed.update({
+            f"http://localhost:{self._ghost_port}",
+            f"http://127.0.0.1:{self._ghost_port}",
+            f"http://localhost:{self.port}",
+            f"http://127.0.0.1:{self.port}",
+        })
+        return clean_origin if clean_origin in allowed else None
 
     async def start(self):
         try:
-            self.server = await asyncio.start_server(self.handle_client, self.host, self.port)
+            self.server = await asyncio.start_server(self.handle_client, self.host, self.port, limit=16384)
             logger.info("Support REST API server active on http://%s:%d", self.host, self.port)
         except OSError as e:
             if getattr(e, 'errno', None) in (98, 10048) or "address already in use" in str(e).lower():
@@ -1194,54 +1512,88 @@ class SupportApiServer:
                 logger.error("Error stopping Support REST API server: %s", e)
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        async with self._conn_sem:
+            await self._handle_client_inner(reader, writer)
+
+    async def _handle_client_inner(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        req_origin = ""
         try:
-            line = await reader.readline()
-            if not line:
-                writer.close()
+            try:
+                line = await asyncio.wait_for(reader.readline(), timeout=15.0)
+            except (asyncio.TimeoutError, asyncio.LimitOverrunError, ValueError):
+                return
+            if not line or len(line) > self.MAX_HEADER_LINE_BYTES:
                 return
             parts = line.decode('utf-8', errors='ignore').strip().split()
             if len(parts) < 2:
-                writer.close()
                 return
             method, path = parts[0].upper(), parts[1]
 
-            headers = {}
+            headers: Dict[str, str] = {}
+            header_count = 0
             while True:
-                hline = await reader.readline()
+                try:
+                    hline = await asyncio.wait_for(reader.readline(), timeout=10.0)
+                except (asyncio.TimeoutError, asyncio.LimitOverrunError, ValueError):
+                    await self._send_response(writer, 400, {"error": "Malformed or slow request headers."})
+                    return
                 if hline in (b'\r\n', b'\n', b''):
                     break
+                header_count += 1
+                if header_count > self.MAX_HEADER_COUNT or len(hline) > self.MAX_HEADER_LINE_BYTES:
+                    await self._send_response(writer, 400, {"error": "Request headers exceed security limits."})
+                    return
                 hstr = hline.decode('utf-8', errors='ignore')
                 hparts = hstr.split(':', 1)
                 if len(hparts) == 2:
                     headers[hparts[0].strip().lower()] = hparts[1].strip()
 
-            content_len = int(headers.get('content-length', 0))
-            # Max payload: 50MB
-            if content_len > 50 * 1024 * 1024:
-                await self._send_response(writer, 413, {"error": "Payload exceeds 50MB limit"})
+            req_origin = headers.get("origin", "")
+
+            try:
+                content_len = int(headers.get('content-length', '0') or '0')
+            except ValueError:
+                await self._send_response(writer, 400, {"error": "Invalid Content-Length header."}, req_origin=req_origin)
+                return
+
+            if content_len < 0:
+                await self._send_response(writer, 400, {"error": "Negative Content-Length is not permitted."}, req_origin=req_origin)
+                return
+            if content_len > self.MAX_BODY_BYTES:
+                await self._send_response(writer, 413, {"error": "Payload exceeds 50MB limit"}, req_origin=req_origin)
                 return
 
             body = b''
             if content_len > 0:
-                body = await reader.readexactly(content_len)
+                try:
+                    if content_len >= self.LARGE_UPLOAD_THRESHOLD:
+                        async with self._upload_sem:
+                            body = await asyncio.wait_for(reader.readexactly(content_len), timeout=60.0)
+                    else:
+                        body = await asyncio.wait_for(reader.readexactly(content_len), timeout=30.0)
+                except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+                    await self._send_response(writer, 400, {"error": "Request body read timed out or truncated."}, req_origin=req_origin)
+                    return
 
-            # Client IP: Prioritize trusted X-Real-IP set by Nginx socket, fallback to X-Forwarded-For
-            client_ip = headers.get('x-real-ip', '').strip() or headers.get('x-forwarded-for', '').split(',')[0].strip() or '127.0.0.1'
+            client_ip = self._extract_client_ip(writer, headers)
             ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
 
             # Route handling
             if method == "OPTIONS":
+                cors_origin = self._resolve_cors_origin(req_origin)
                 header_lines = [
                     "HTTP/1.1 204 No Content",
-                    "Access-Control-Allow-Origin: *",
                     "Access-Control-Allow-Methods: GET, POST, OPTIONS",
-                    "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Forwarded-For",
+                    "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key",
                     "Access-Control-Max-Age: 86400",
+                    "X-Content-Type-Options: nosniff",
                     "Content-Length: 0",
                     "Connection: close",
-                    "",
-                    ""
                 ]
+                if cors_origin:
+                    header_lines.insert(1, f"Access-Control-Allow-Origin: {cors_origin}")
+                    header_lines.insert(2, "Vary: Origin")
+                header_lines.extend(["", ""])
                 writer.write("\r\n".join(header_lines).encode('utf-8'))
                 await writer.drain()
                 return
@@ -1253,7 +1605,7 @@ class SupportApiServer:
             if not route_path.startswith("/"):
                 route_path = "/" + route_path
 
-            query = {}
+            query: Dict[str, str] = {}
             if '?' in path:
                 qstr = path.split('?', 1)[1]
                 for qitem in qstr.split('&'):
@@ -1268,17 +1620,20 @@ class SupportApiServer:
                 await self._send_response(writer, 200, {
                     "status": "ok",
                     "service": "support-hub",
-                    "version": "1.0.0",
+                    "version": "1.1.0",
                     "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                })
+                }, req_origin=req_origin)
                 return
 
             # -------------------------------------------------------------
             # GET /captcha (Obtain Cryptographic Security Challenge)
             # -------------------------------------------------------------
             elif method == "GET" and route_path == "/captcha":
+                if self._check_rate_limit("captcha", client_ip, max_hits=30, window_sec=300):
+                    await self._send_response(writer, 429, {"error": "Too many challenge requests. Please wait briefly."}, req_origin=req_origin)
+                    return
                 challenge = self.captcha.generate_challenge()
-                await self._send_response(writer, 200, challenge)
+                await self._send_response(writer, 200, challenge, req_origin=req_origin)
                 return
 
             # -------------------------------------------------------------
@@ -1286,24 +1641,27 @@ class SupportApiServer:
             # -------------------------------------------------------------
             elif method == "POST" and route_path == "/cases":
                 if self._is_rate_limited(client_ip):
-                    await self._send_response(writer, 429, {"error": "Submission rate limit exceeded. Please wait a while before submitting again."})
+                    await self._send_response(writer, 429, {"error": "Submission rate limit exceeded. Please wait a while before submitting again."}, req_origin=req_origin)
                     return
 
                 ctype = headers.get('content-type', '')
-                params = {}
+                params: Dict[str, Any] = {}
                 evidence_files: List[Dict[str, Any]] = []
 
                 if "application/json" in ctype:
                     try:
                         params = json.loads(body.decode('utf-8'))
+                        body = b''
                     except Exception as e:
                         logger.warning("JSON parse error: %s", e)
-                        await self._send_response(writer, 400, {"error": "Invalid JSON payload."})
+                        await self._send_response(writer, 400, {"error": "Invalid JSON payload."}, req_origin=req_origin)
                         return
                 elif "multipart/form-data" in ctype:
                     try:
                         msg_bytes = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode('utf-8') + body
+                        body = b''
                         msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
+                        del msg_bytes
                         for part in msg.iter_parts():
                             name = part.get_param('name', header='content-disposition')
                             filename = part.get_filename()
@@ -1311,47 +1669,62 @@ class SupportApiServer:
                             if not payload:
                                 continue
                             if filename:
-                                evidence_files.append({"filename": filename, "data": payload, "mime": part.get_content_type()})
+                                if len(evidence_files) < 10:
+                                    evidence_files.append({"filename": filename, "data": payload, "mime": part.get_content_type()})
                             elif name:
                                 params[name] = payload.decode('utf-8', errors='replace').strip()
+                        del msg
                     except Exception as e:
                         logger.warning("Multipart parse error: %s", e)
-                        await self._send_response(writer, 400, {"error": f"Failed to parse multipart upload: {e}"})
+                        await self._send_response(writer, 400, {"error": "Failed to parse multipart upload."}, req_origin=req_origin)
                         return
                 else:
                     try:
                         params = json.loads(body.decode('utf-8'))
+                        body = b''
                     except Exception:
-                        await self._send_response(writer, 400, {"error": "Unsupported Content-Type. Please use application/json or multipart/form-data."})
+                        await self._send_response(writer, 400, {"error": "Unsupported Content-Type. Please use application/json or multipart/form-data."}, req_origin=req_origin)
                         return
 
                 # Verify Security Challenge / Anti-Flooding Captcha + PoW
-                c_id = params.get("captcha_id", "").strip()
-                c_ts = int(params.get("captcha_timestamp", 0) or 0)
-                c_sig = params.get("captcha_signature", "").strip()
-                c_sol = params.get("captcha_solution", "").strip()
-                c_nonce = params.get("captcha_nonce", "").strip()
+                c_id = str(params.get("captcha_id", "") or "").strip()
+                try:
+                    c_ts = int(params.get("captcha_timestamp", 0) or 0)
+                except (ValueError, TypeError):
+                    c_ts = 0
+                c_sig = str(params.get("captcha_signature", "") or "").strip()
+                c_sol = str(params.get("captcha_solution", "") or "").strip()
+                c_nonce = str(params.get("captcha_nonce", "") or "").strip()
 
                 if not c_id or not c_sig or not c_sol or not c_nonce:
-                    await self._send_response(writer, 400, {"error": "Please solve the calculation puzzle to verify your submission."})
+                    await self._send_response(writer, 400, {"error": "Please solve the calculation puzzle to verify your submission."}, req_origin=req_origin)
                     return
 
                 if not self.captcha.verify_challenge(c_id, c_ts, c_sig, c_sol, c_nonce):
-                    await self._send_response(writer, 403, {"error": "Security verification failed or expired. Please solve the updated puzzle."})
+                    await self._send_response(writer, 403, {"error": "Security verification failed or expired. Please solve the updated puzzle."}, req_origin=req_origin)
                     return
 
-                subject = params.get("subject", "").strip()
-                description = params.get("description", "").strip()
-                category = params.get("category", "Incident Report").strip()
-                priority = params.get("priority", "STANDARD").strip().upper()
-                alias = params.get("reporter_alias", "Anonymous").strip() or "Anonymous"
-                contact = params.get("reporter_contact", "").strip()
-                member_email = params.get("member_email", "").strip().lower()
-                member_uuid = params.get("member_uuid", "").strip()
+                subject = str(params.get("subject", "") or "").strip()[:300]
+                description = str(params.get("description", "") or "").strip()[:20000]
+                category = str(params.get("category", "Incident Report") or "Incident Report").strip()[:100]
+                priority = str(params.get("priority", "STANDARD") or "STANDARD").strip().upper()[:32]
+                alias = (str(params.get("reporter_alias", "Anonymous") or "").strip() or "Anonymous")[:120]
+                contact = str(params.get("reporter_contact", "") or "").strip()[:200]
+                req_member_email = str(params.get("member_email", "") or "").strip().lower()
+                req_member_uuid = str(params.get("member_uuid", "") or "").strip()
 
                 if not subject or not description:
-                    await self._send_response(writer, 400, {"error": "Subject and Detailed Description are required fields."})
+                    await self._send_response(writer, 400, {"error": "Subject and Detailed Description are required fields."}, req_origin=req_origin)
                     return
+
+                # Only bind member identity if verified against Ghost's signed session cookie (HIGH-01)
+                verified_email: Optional[str] = None
+                verified_uuid: Optional[str] = None
+                if req_member_email or req_member_uuid:
+                    verified_member = await self._verify_ghost_member_cookie(headers.get("cookie", ""))
+                    if verified_member:
+                        verified_email = verified_member["email"]
+                        verified_uuid = verified_member["uuid"]
 
                 # Create case in DB
                 case_res = self.vault.create_case(
@@ -1362,8 +1735,8 @@ class SupportApiServer:
                     reporter_alias=alias,
                     reporter_contact=contact,
                     ip_hash=ip_hash,
-                    member_email=member_email or None,
-                    member_uuid=member_uuid or None
+                    member_email=verified_email,
+                    member_uuid=verified_uuid
                 )
                 case_code = case_res["case_code"]
 
@@ -1371,7 +1744,9 @@ class SupportApiServer:
                 saved_files = []
                 for ef in evidence_files:
                     saved = self.vault.save_evidence(case_code, ef["filename"], ef["data"], ef.get("mime"))
+                    ef["data"] = b""
                     saved_files.append(saved)
+                evidence_files.clear()
 
                 # Fetch full case record and alert Telegram bot
                 full_case = self.vault.get_case(case_code)
@@ -1384,60 +1759,65 @@ class SupportApiServer:
                     "access_key": case_res["access_key"],
                     "status": "SUBMITTED",
                     "file_count": len(saved_files)
-                })
+                }, req_origin=req_origin)
                 return
 
             # -------------------------------------------------------------
             # GET /member/cases or /cases/member (List Member's Past Cases)
             # -------------------------------------------------------------
             elif method == "GET" and route_path in ("/member/cases", "/cases/member"):
-                m_email = query.get("email", "").strip().lower()
-                m_uuid = query.get("uuid", "").strip()
-                # Security: Require private member UUID to prevent unauthorized email enumeration (SEC-03)
-                if not m_uuid:
-                    await self._send_response(writer, 401, {"error": "Authentication required: Valid member UUID session identifier is missing."})
+                if self._check_rate_limit("member_cases", client_ip, max_hits=30, window_sec=300):
+                    await self._send_response(writer, 429, {"error": "Rate limit exceeded."}, req_origin=req_origin)
                     return
 
-                cases = self.vault.list_member_cases(member_email=m_email, member_uuid=m_uuid)
+                verified_member = await self._verify_ghost_member_cookie(headers.get("cookie", ""))
+                if not verified_member:
+                    await self._send_response(writer, 401, {"error": "Authentication required: Valid Ghost member session cookie is missing or expired."}, req_origin=req_origin)
+                    return
+
+                cases = self.vault.list_member_cases(
+                    member_email=verified_member["email"],
+                    member_uuid=verified_member["uuid"]
+                )
                 await self._send_response(writer, 200, {
                     "success": True,
                     "cases": cases
-                })
+                }, req_origin=req_origin)
                 return
 
             # -------------------------------------------------------------
             # GET /cases/<case_code>/evidence/<file_id> (Stream Evidence File - RESTRICTED TO BOT)
             # -------------------------------------------------------------
             elif method == "GET" and "/evidence/" in route_path and route_path.startswith("/cases/"):
-                # Strict OpSec & Chain-of-Custody: Direct web browser viewing/downloading is disabled.
-                # Evidence files are permanently sequestered in the offline vault and accessible solely
-                # by verified administrators through the dedicated operational Telegram Bot.
                 await self._send_response(writer, 403, {
                     "error": "Direct web access to uploaded evidence is disabled for operational security. "
                              "Evidence files are sequestered in an isolated vault and accessible exclusively "
                              "by duty investigators via the verified operational Telegram Bot.",
                     "vault_status": "SECURED"
-                })
+                }, req_origin=req_origin)
                 return
 
             # -------------------------------------------------------------
             # GET /cases/<case_code> (Fetch Case Status & Chat)
             # -------------------------------------------------------------
             elif method == "GET" and route_path.startswith("/cases/") and not route_path.endswith("/messages"):
-                parts = [p for p in route_path.split("/") if p]
-                if len(parts) < 2:
-                    await self._send_response(writer, 400, {"error": "Invalid case endpoint format."})
-                    return
-                case_code = parts[1]
-                access_key = query.get("key", "").strip()
-                case_data = self.vault.get_case(case_code)
-                if not case_data:
-                    await self._send_response(writer, 404, {"error": "Case not found."})
+                if self._check_rate_limit("case_lookup", client_ip, max_hits=120, window_sec=300):
+                    await self._send_response(writer, 429, {"error": "Too many lookup requests. Please slow down."}, req_origin=req_origin)
                     return
 
-                # Validate access key
-                if not access_key or case_data["access_key"] != access_key:
-                    await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
+                parts = [p for p in route_path.split("/") if p]
+                if len(parts) < 2:
+                    await self._send_response(writer, 400, {"error": "Invalid case endpoint format."}, req_origin=req_origin)
+                    return
+                case_code = parts[1]
+                access_key = (headers.get("x-case-key", "") or query.get("key", "")).strip()
+                case_data = self.vault.get_case(case_code)
+                if not case_data:
+                    await self._send_response(writer, 404, {"error": "Case not found."}, req_origin=req_origin)
+                    return
+
+                if not await self._is_case_authorized(case_data, access_key, headers.get("cookie", "")):
+                    await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."}, req_origin=req_origin)
                     return
 
                 # Strip internal server path and mark evidence as bot-vaulted only
@@ -1466,70 +1846,89 @@ class SupportApiServer:
                     "resolution_note": case_data.get("resolution_note"),
                     "files": safe_files,
                     "messages": case_data.get("messages", [])
-                })
+                }, req_origin=req_origin)
                 return
 
             # -------------------------------------------------------------
             # POST /cases/<case_code>/messages (Reporter Chat)
             # -------------------------------------------------------------
             elif method == "POST" and route_path.startswith("/cases/") and route_path.endswith("/messages"):
+                if self._check_rate_limit("case_msg_ip", client_ip, max_hits=25, window_sec=300):
+                    await self._send_response(writer, 429, {"error": "Message rate limit exceeded. Please wait briefly before sending more messages."}, req_origin=req_origin)
+                    return
+
                 parts = [p for p in route_path.split("/") if p]
                 if len(parts) < 3:
-                    await self._send_response(writer, 400, {"error": "Invalid message endpoint format."})
+                    await self._send_response(writer, 400, {"error": "Invalid message endpoint format."}, req_origin=req_origin)
                     return
                 case_code = parts[1]
+                if self._check_rate_limit("case_msg_code", case_code, max_hits=20, window_sec=300):
+                    await self._send_response(writer, 429, {"error": "Too many messages posted to this case recently."}, req_origin=req_origin)
+                    return
+
                 case_data = self.vault.get_case(case_code)
                 if not case_data:
-                    await self._send_response(writer, 404, {"error": "Case not found."})
+                    await self._send_response(writer, 404, {"error": "Case not found."}, req_origin=req_origin)
                     return
 
                 ctype = headers.get('content-type', '')
                 text = ""
-                key = ""
+                key = headers.get("x-case-key", "").strip()
                 attached_file = None
                 if "application/json" in ctype:
                     try:
                         p = json.loads(body.decode('utf-8'))
-                        text = p.get("message", "").strip()
-                        key = p.get("key", "").strip()
+                        body = b''
+                        text = str(p.get("message", "") or "").strip()[:10000]
+                        key = str(p.get("key", "") or key).strip()
                     except Exception:
-                        await self._send_response(writer, 400, {"error": "Invalid JSON"})
+                        await self._send_response(writer, 400, {"error": "Invalid JSON"}, req_origin=req_origin)
                         return
                 elif "multipart/form-data" in ctype:
                     try:
                         msg_bytes = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode('utf-8') + body
+                        body = b''
                         msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
+                        del msg_bytes
                         for part in msg.iter_parts():
                             name = part.get_param('name', header='content-disposition')
                             filename = part.get_filename()
                             payload = part.get_payload(decode=True)
-                            if filename and payload:
+                            if filename and payload and attached_file is None:
                                 attached_file = {"filename": filename, "data": payload, "mime": part.get_content_type()}
                             elif name == "message" and payload:
-                                text = payload.decode('utf-8', errors='replace').strip()
+                                text = payload.decode('utf-8', errors='replace').strip()[:10000]
                             elif name == "key" and payload:
                                 key = payload.decode('utf-8', errors='replace').strip()
+                        del msg
                     except Exception:
                         pass
                 else:
                     try:
                         p = json.loads(body.decode('utf-8'))
-                        text = p.get("message", "").strip()
-                        key = p.get("key", "").strip()
+                        body = b''
+                        text = str(p.get("message", "") or "").strip()[:10000]
+                        key = str(p.get("key", "") or key).strip()
                     except Exception:
                         pass
 
-                if not key or case_data["access_key"] != key:
-                    await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."})
+                if not await self._is_case_authorized(case_data, key, headers.get("cookie", "")):
+                    await self._send_response(writer, 403, {"error": "Invalid or missing Case Access Key."}, req_origin=req_origin)
                     return
 
                 if not text and not attached_file:
-                    await self._send_response(writer, 400, {"error": "Message text or attachment is required."})
+                    await self._send_response(writer, 400, {"error": "Message text or attachment is required."}, req_origin=req_origin)
                     return
 
                 if attached_file:
-                    self.vault.save_evidence(case_code, attached_file["filename"], attached_file["data"], attached_file.get("mime"))
-                    text = f"📁 [{attached_file['filename']}]\n{text}" if text else f"📁 [{attached_file['filename']}]"
+                    existing_files = case_data.get("files") or []
+                    if len(existing_files) >= self.MAX_FILES_PER_CASE:
+                        await self._send_response(writer, 429, {"error": f"Maximum attachment limit ({self.MAX_FILES_PER_CASE} files) reached for this case."}, req_origin=req_origin)
+                        return
+                    saved_ev = self.vault.save_evidence(case_code, attached_file["filename"], attached_file["data"], attached_file.get("mime"))
+                    attached_file["data"] = b""
+                    safe_disp_name = saved_ev.get("original_name") or "attachment"
+                    text = f"📁 [{safe_disp_name}]\n{text}" if text else f"📁 [{safe_disp_name}]"
 
                 new_msg = self.vault.add_message(
                     case_code=case_code,
@@ -1544,16 +1943,16 @@ class SupportApiServer:
                 await self._send_response(writer, 201, {
                     "success": True,
                     "message": new_msg
-                })
+                }, req_origin=req_origin)
                 return
 
             else:
-                await self._send_response(writer, 404, {"error": f"Endpoint '{clean_path}' not found."})
+                await self._send_response(writer, 404, {"error": f"Endpoint '{clean_path}' not found."}, req_origin=req_origin)
 
         except Exception as e:
             logger.error("HTTP request error: %s", e)
             try:
-                await self._send_response(writer, 500, {"error": "Internal server error"})
+                await self._send_response(writer, 500, {"error": "Internal server error"}, req_origin=req_origin)
             except Exception:
                 pass
         finally:
@@ -1563,12 +1962,19 @@ class SupportApiServer:
             except Exception:
                 pass
 
-    async def _send_response(self, writer: asyncio.StreamWriter, status_code: int, data: Optional[Dict[str, Any]]):
+    async def _send_response(
+        self,
+        writer: asyncio.StreamWriter,
+        status_code: int,
+        data: Optional[Dict[str, Any]],
+        req_origin: str = "",
+    ):
         status_texts = {
             200: "OK",
             201: "Created",
             204: "No Content",
             400: "Bad Request",
+            401: "Unauthorized",
             403: "Forbidden",
             404: "Not Found",
             413: "Payload Too Large",
@@ -1586,14 +1992,22 @@ class SupportApiServer:
             "Cache-Control: no-cache, no-store, must-revalidate",
             "Pragma: no-cache",
             "Expires: 0",
-            "Access-Control-Allow-Origin: *",
+            "X-Content-Type-Options: nosniff",
+            "X-Frame-Options: DENY",
+            "Referrer-Policy: no-referrer",
             "Access-Control-Allow-Methods: GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Forwarded-For",
+            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key",
+        ]
+        cors_origin = self._resolve_cors_origin(req_origin)
+        if cors_origin:
+            header_lines.append(f"Access-Control-Allow-Origin: {cors_origin}")
+            header_lines.append("Vary: Origin")
+        header_lines.extend([
             f"Content-Length: {len(body_bytes)}",
             "Connection: close",
             "",
             ""
-        ]
+        ])
         headers_raw = "\r\n".join(header_lines).encode('utf-8')
         writer.write(headers_raw + body_bytes)
         await writer.drain()
@@ -1608,11 +2022,19 @@ def init_support_hub(
     ghost_dir: str = "/var/www/ghost",
     admin_chat_id: int = 0,
     port: int = 8080,
-    host: str = "127.0.0.1"
+    host: str = "127.0.0.1",
+    allowed_user_ids: Optional[Set[int]] = None,
+    auth_callback: Optional[Callable[[int], bool]] = None,
 ) -> SupportApiServer:
     """Initialize the Vault, Bot Bridge, and HTTP Server on the bot's asyncio loop."""
     vault = SupportVault(ghost_dir=ghost_dir)
-    bridge = SupportBotBridge(application=application, vault=vault, admin_chat_id=admin_chat_id)
+    bridge = SupportBotBridge(
+        application=application,
+        vault=vault,
+        admin_chat_id=admin_chat_id,
+        allowed_user_ids=allowed_user_ids,
+        auth_callback=auth_callback,
+    )
     server = SupportApiServer(vault=vault, bridge=bridge, host=host, port=port)
     return server
 

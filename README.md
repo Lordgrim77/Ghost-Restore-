@@ -13,6 +13,7 @@ A production-ready suite for Ghost CMS publications featuring:
 
 ## 📑 Table of Contents
 
+- [📦 Which Script / Package Should I Use?](#-which-script--package-should-i-use)
 - [🎨 Part 1: Theme Setup & Installation](#-part-1-theme-setup--installation)
   - [Option A: 1-Click Automated Theme Deployer (Recommended)](#option-a-1-click-automated-theme-deployer-recommended)
   - [Option B: Manual Theme Setup via Ghost Admin](#option-b-manual-theme-setup-via-ghost-admin)
@@ -21,8 +22,7 @@ A production-ready suite for Ghost CMS publications featuring:
 - [🤖 Part 2: Bot Setup & Installation](#-part-2-bot-setup--installation)
   - [Prerequisites (Telegram Bot & User ID)](#prerequisites-telegram-bot--user-id)
   - [Option A: 1-Click Interactive Automated Installer (Recommended)](#option-a-1-click-interactive-automated-installer-recommended)
-  - [Option B: 1-Click Quick Support Hub & Bot Updater](#option-b-1-click-quick-support-hub--bot-updater)
-  - [Option C: Manual Bot Installation](#option-c-manual-bot-installation)
+  - [Option B: Manual Bot Installation](#option-b-manual-bot-installation)
   - [Configuration Reference (.env)](#configuration-reference-env)
   - [Nginx Reverse Proxy Configuration](#nginx-reverse-proxy-configuration)
   - [Service Management Commands](#service-management-commands)
@@ -30,6 +30,21 @@ A production-ready suite for Ghost CMS publications featuring:
 - [📂 Repository File Structure](#-repository-file-structure)
 - [🔍 Verification & Troubleshooting](#-verification--troubleshooting)
 - [📄 License](#-license)
+
+---
+
+## 📦 Which Script / Package Should I Use?
+
+Only **three server scripts** (`install.sh`, `deploy_theme.sh`, `uninstall.sh`) and **two `.zip` packages** are used:
+
+| File | Type | Purpose & When to Use |
+| :--- | :--- | :--- |
+| **`install.sh`** | Server Script | **Run first on a fresh server.** Interactively asks for your Telegram Bot Token and Admin User ID, sets up `/opt/ghost-telegram-bot`, starts `ghost-telegram-bot.service` + port `8080` Support API, and configures Nginx `/api/support/`. |
+| **`deploy_theme.sh`** | Server Script | **Run to install or update the theme, email templates & portal.** Unpacks `alto-theme-latest.zip` and `email-templates.zip`, configures `routes.yaml`, creates `/support/` and `/team/` pages, syncs backend Python files, and restarts Ghost. |
+| **`uninstall.sh`** | Server Script | **Optional cleanup.** Stops and removes the bot/support systemd services and `/opt/ghost-telegram-bot` while keeping your backups and support vault safe. |
+| **`alto-theme-latest.zip`** | Theme Package | Ready-to-use Ghost **Alto** theme (contains `/support/`, `/team/`, `portal-theme.js`, `team-page.js`, and `team.json`). Automatically installed by `deploy_theme.sh`, or uploadable manually in **Ghost Admin → Design → Upload theme**. |
+| **`email-templates.zip`** | Core Package | Redesigned dark-mode Ghost transactional email templates + `models/author.js` override (so 0-post staff appear on `/team/`). Automatically extracted into Ghost core by `deploy_theme.sh` (Ghost Admin theme upload cannot modify Ghost core files). |
+| *(Maintainer only)* `package_all.py` | Local Build Tool | Developer script used when editing source `.hbs`/`.js` files to rebuild `alto-theme-latest.zip` and `email-templates.zip`. **Not needed on your Ubuntu server.** |
 
 ---
 
@@ -173,7 +188,7 @@ The `/team/` showcase dynamically renders team members configured in `assets/dat
 #### Where to Edit
 
 * **Live Server**: `/var/www/ghost/content/themes/<active-theme>/assets/data/team.json`
-* **Repository Source**: [`team.json`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/team.json) and inside [`assets/data/team.json`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/assets/data/team.json)
+* **Repository Source**: [`team.json`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/team.json) *(packaged into `alto-theme-latest.zip` as `assets/data/team.json`)*
 * **Inline Fallback**: Inside [`page-team.hbs`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/page-team.hbs#L361-L389) `<script id="gm-team-default-data" type="application/json">`
 
 ---
@@ -214,24 +229,7 @@ curl -sSL https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main/insta
 
 ---
 
-### Option B: 1-Click Quick Support Hub & Bot Updater
-
-If you already have the bot installed or need to update the support backend, sync templates, and verify connections, run:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main/setup_support.sh | sudo bash
-```
-
-This script:
-- Fetches the latest [`bot.py`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/bot.py), [`support_hub.py`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/support_hub.py), and [`page-support.hbs`](file:///C:/Users/LordgrimxDJay/.gemini/antigravity/scratch/Ghost-Restore/page-support.hbs).
-- Distributes `page-support.hbs` across all installed Ghost themes.
-- Verifies Python virtualenv dependencies.
-- Restarts the background service and Nginx.
-- Performs a connection self-test on port 8080 and `/api/support/`.
-
----
-
-### Option C: Manual Bot Installation
+### Option B: Manual Bot Installation
 
 If you prefer to configure the service manually:
 
@@ -245,8 +243,8 @@ sudo python3 -m venv venv
 sudo ./venv/bin/pip install --upgrade pip
 sudo ./venv/bin/pip install -r requirements.txt
 
-# 3. Create .env configuration
-sudo cp .env.example .env
+# 3. Create .env configuration with restricted permissions
+sudo install -m 600 .env.example .env
 sudo nano .env
 
 # 4. Create systemd service
@@ -259,8 +257,10 @@ After=network.target mysql.service
 Type=simple
 User=root
 WorkingDirectory=/opt/ghost-telegram-bot
-EnvironmentFile=/opt/ghost-telegram-bot/.env
+EnvironmentFile=-/opt/ghost-telegram-bot/.env
 ExecStart=/opt/ghost-telegram-bot/venv/bin/python3 /opt/ghost-telegram-bot/bot.py
+PrivateTmp=true
+UMask=0077
 Restart=always
 RestartSec=5
 
@@ -413,27 +413,30 @@ When a visitor or member submits a report on `/support/`, the bot:
 
 ```
 Ghost-Restore/
-├── alto-theme-latest.zip     # Ready-to-upload Alto theme zip package
-├── email-templates.zip       # Redesigned obsidian email templates package
-├── page-support.hbs          # Clean support intake & member case tracking portal
-├── page-team.hbs             # Team showcase page template
-├── routes.yaml               # Routing configuration for /support/ and /team/
-├── team.json                 # Team members data configuration
-├── team-page.js              # Client-side dynamic team card rendering engine
+├── install.sh                # [Server Script 1] Interactive Bot & Support API installer
+├── deploy_theme.sh           # [Server Script 2] Automated Theme, Email & Portal deployer/updater
+├── uninstall.sh              # [Server Script 3] Clean service & bot uninstaller
 │
-├── deploy_theme.sh           # 1-Click theme & support portal deployer script
-├── install.sh                # 1-Click interactive bot installer
-├── setup_support.sh          # 1-Click support hub connector & updater
-├── fix_bot.sh                # 1-Click diagnostic and auto-repair utility
-├── uninstall.sh              # Clean removal script
+├── alto-theme-latest.zip     # [Package 1] Ready-to-upload Ghost Alto theme archive
+├── email-templates.zip       # [Package 2] Dark-mode Ghost core email templates + author override
 │
 ├── bot.py                    # Telegram bot event handler & triage bridge
-├── ghost_manager.py          # Backup/restore snapshot engine & permission fixer
+├── ghost_manager.py          # Backup/restore snapshot engine & GitHub sync manager
 ├── support_hub.py            # Async REST API server (port 8080) & SQLite vault
-├── package_all.py            # Build script for packaging Alto theme and templates
+│
+├── page-support.hbs          # Source template: Support intake & member case tracking portal
+├── page-team.hbs             # Source template: Team showcase page
+├── page-about.hbs            # Source template: About page with team callout
+├── portal-theme.js           # Source script: Ghost Portal modal dark/light styling & reset flow
+├── team-page.js              # Source script: Dynamic team card rendering engine
+├── team.json                 # Team members configuration data
+├── routes.yaml               # Ghost routing configuration for /support/ and /team/
+├── email-templates/          # Source templates for Ghost transactional & member emails
+├── models/author.js          # Ghost core Author model override (active 0-post staff on /team/)
+├── package_all.py            # Maintainer build script to repackage both .zip archives
 │
 ├── .env.example              # Example environment configuration template
-├── requirements.txt          # Python dependencies (python-telegram-bot, requests)
+├── requirements.txt          # Python dependencies
 └── README.md                 # Complete documentation and setup guide
 ```
 

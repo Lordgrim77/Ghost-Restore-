@@ -1871,7 +1871,12 @@
           if (mainTitle) mainTitle.textContent = 'Reset password';
 
           const origInput = signinContent.querySelector('#input-email');
-          const existingEmail = (origInput && origInput.value) || '';
+          const existingEmail = String((origInput && origInput.value) || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
 
           const oldResetView = signinContent.querySelector('.gm-portal-reset-view');
           if (oldResetView) oldResetView.remove();
@@ -1888,7 +1893,7 @@
                 <div class="gh-portal-input-labelcontainer">
                   <label for="input-reset-email" class="gh-portal-input-label">Email</label>
                 </div>
-                <input id="input-reset-email" class="gh-portal-input" type="email" placeholder="jamie@example.com" value="${existingEmail.replace(/"/g, '&quot;')}" autocomplete="email">
+                <input id="input-reset-email" class="gh-portal-input" type="email" placeholder="jamie@example.com" value="${existingEmail}" autocomplete="email">
               </section>
             </div>
             <footer class="gh-portal-signin-footer" style="margin-top: 20px;">
@@ -1955,7 +1960,7 @@
           sendBtn.addEventListener('click', async (ev) => {
             ev.preventDefault();
             const emailVal = resetEmailInput ? resetEmailInput.value.trim() : '';
-            if (!emailVal || !emailVal.includes('@')) {
+            if (!emailVal || !/^[^\s@<>"]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(emailVal)) {
               feedback.style.display = 'block';
               feedback.style.borderColor = '#e11d48';
               feedback.style.color = '#f43f5e';
@@ -1989,10 +1994,22 @@
             feedback.style.display = 'block';
             feedback.style.borderColor = '';
             feedback.style.color = '';
-            feedback.innerHTML = `
-              <div style="font-size: 15px; font-weight: 700; margin-bottom: 6px;">✓ Recovery link sent</div>
-              <div style="font-size: 13px; opacity: 0.85; line-height: 1.5;">If an account exists for <strong>${emailVal}</strong>, we have sent a password reset and sign-in link to your inbox.</div>
-            `;
+            feedback.textContent = '';
+
+            const titleDiv = doc.createElement('div');
+            titleDiv.style.cssText = 'font-size: 15px; font-weight: 700; margin-bottom: 6px;';
+            titleDiv.textContent = '✓ Recovery link sent';
+
+            const msgDiv = doc.createElement('div');
+            msgDiv.style.cssText = 'font-size: 13px; opacity: 0.85; line-height: 1.5;';
+            msgDiv.appendChild(doc.createTextNode('If an account exists for '));
+            const emailStrong = doc.createElement('strong');
+            emailStrong.textContent = emailVal;
+            msgDiv.appendChild(emailStrong);
+            msgDiv.appendChild(doc.createTextNode(', we have sent a password reset and sign-in link to your inbox.'));
+
+            feedback.appendChild(titleDiv);
+            feedback.appendChild(msgDiv);
           });
         });
 

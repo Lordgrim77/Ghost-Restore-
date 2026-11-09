@@ -82,11 +82,43 @@ def sync_editable_email_templates_to_core():
         shutil.copy2(author_model_src, author_model_dst)
         print("  ✓ Synchronized models/author.js into Ghost core.")
 
+
+def sync_repo_theme_files_to_theme_src():
+    print(f"[*] Syncing updated repo theme templates & scripts into {THEME_SRC}...")
+    theme_sync_map = {
+        "page-support.hbs": ["page-support.hbs"],
+        "page-about.hbs": ["page-about.hbs"],
+        "page-team.hbs": ["page-team.hbs"],
+        "team.json": [os.path.join("assets", "data", "team.json")],
+        "portal-theme.js": [
+            os.path.join("assets", "built", "portal-theme.js"),
+            os.path.join("assets", "js", "portal-theme.js"),
+        ],
+        "team-page.js": [
+            os.path.join("assets", "built", "team-page.js"),
+            os.path.join("assets", "js", "team-page.js"),
+        ],
+    }
+    synced = 0
+    for repo_rel, theme_rels in theme_sync_map.items():
+        src_path = os.path.join(REPO_DIR, repo_rel)
+        if not os.path.exists(src_path):
+            continue
+        for idx, dst_rel in enumerate(theme_rels):
+            dst_path = os.path.join(THEME_SRC, dst_rel)
+            # Always write primary target (idx == 0); write secondary source copy if parent exists
+            if idx == 0 or os.path.exists(dst_path):
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+                synced += 1
+    print(f"  ✓ Synchronized {synced} theme asset target(s) into {THEME_SRC}.")
+
+
 def package_theme():
     print(f"[*] Packaging Alto theme from {THEME_SRC}...")
     with zipfile.ZipFile(THEME_ZIP_DST, 'w', zipfile.ZIP_DEFLATED) as zf:
         for root, dirs, files in os.walk(THEME_SRC):
-            dirs[:] = [d for d in dirs if d not in ['.git', '__pycache__', 'node_modules']]
+            dirs[:] = [d for d in dirs if d not in ['.git', '__pycache__', 'node_modules', 'scratch', '.github']]
             for file in sorted(files):
                 if file.startswith('.') or file.endswith('.pyc'):
                     continue
@@ -119,5 +151,6 @@ def package_emails():
 
 if __name__ == "__main__":
     sync_editable_email_templates_to_core()
+    sync_repo_theme_files_to_theme_src()
     package_theme()
     package_emails()

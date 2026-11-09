@@ -1,13 +1,17 @@
 {{!< default}}
 
 {{#if @member}}
+<meta id="gm-support-member-meta" data-email="{{@member.email}}" data-name="{{@member.name}}" data-uuid="{{@member.uuid}}">
 <script>
-window.GHOST_MEMBER = {
-    loggedIn: true,
-    email: "{{@member.email}}",
-    name: "{{@member.name}}",
-    uuid: "{{@member.uuid}}"
-};
+(function() {
+    var m = document.getElementById('gm-support-member-meta');
+    window.GHOST_MEMBER = {
+        loggedIn: true,
+        email: m ? (m.getAttribute('data-email') || '') : '',
+        name: m ? (m.getAttribute('data-name') || '') : '',
+        uuid: m ? (m.getAttribute('data-uuid') || '') : ''
+    };
+})();
 </script>
 {{else}}
 <script>
@@ -2444,6 +2448,7 @@ html.light-mode .gm-evidence-meta code {
 
             const res = await fetch(`${API_BASE}/cases`, {
                 method: 'POST',
+                credentials: 'same-origin',
                 body: formData
             });
 
@@ -2530,7 +2535,9 @@ html.light-mode .gm-evidence-meta code {
         if (window.GHOST_MEMBER && window.GHOST_MEMBER.loggedIn) {
             sub.textContent = `Showing cases submitted under ${window.GHOST_MEMBER.email}`;
             try {
-                const res = await fetch(`${API_BASE}/member/cases?email=${encodeURIComponent(window.GHOST_MEMBER.email)}&uuid=${encodeURIComponent(window.GHOST_MEMBER.uuid || '')}`);
+                const res = await fetch(`${API_BASE}/member/cases`, {
+                    credentials: 'same-origin'
+                });
                 if (res.ok) {
                     const data = await res.json();
                     if (data && data.cases) {
@@ -2544,7 +2551,17 @@ html.light-mode .gm-evidence-meta code {
             sub.textContent = 'Showing cases saved on this device. Sign in to your account to view all your cases.';
         }
 
-        // Merge local cases into remote cases without duplicates
+        // Preserve locally cached access_key when available and merge unseen local cases
+        const localKeyMap = {};
+        localCases.forEach(lc => {
+            if (lc && lc.case_code && lc.access_key) {
+                localKeyMap[lc.case_code] = lc.access_key;
+            }
+        });
+        cases = cases.map(c => Object.assign({}, c, {
+            access_key: c.access_key || localKeyMap[c.case_code] || ''
+        }));
+
         const seen = new Set(cases.map(c => c.case_code));
         localCases.forEach(lc => {
             if (!seen.has(lc.case_code)) {
@@ -2583,7 +2600,7 @@ html.light-mode .gm-evidence-meta code {
                     <h4 class="gm-case-card-subject">${escapeHtml(c.subject || 'No Subject')}</h4>
                     <p class="gm-case-card-desc">${escapeHtml(c.description || '')}</p>
                     <div class="gm-case-card-actions">
-                        <button type="button" class="gm-open-case-btn" onclick="openCaseFromList('${escapeHtml(code)}', '${escapeHtml(accessKey)}')">
+                        <button type="button" class="gm-open-case-btn" data-case-code="${escapeHtml(code)}" data-access-key="${escapeHtml(accessKey)}" onclick="openCaseFromList(this.getAttribute('data-case-code'), this.getAttribute('data-access-key'))">
                             <span>Open Case &amp; Live Chat →</span>
                         </button>
                     </div>
@@ -2611,18 +2628,22 @@ html.light-mode .gm-evidence-meta code {
         }
     }
 
+    function canUseMemberSession() {
+        return Boolean(window.GHOST_MEMBER && window.GHOST_MEMBER.loggedIn);
+    }
+
     window.openCaseFromList = function(code, key) {
-        document.getElementById('lookupCaseCode').value = code;
-        document.getElementById('lookupAccessKey').value = key;
+        document.getElementById('lookupCaseCode').value = code || '';
+        document.getElementById('lookupAccessKey').value = key || '';
         switchSupportTab('track');
-        loadCase(code, key);
+        loadCase(code || '', key || '');
     };
 
     // Case Lookup & Dashboard
     window.loadCaseFromInputs = function() {
         const code = document.getElementById('lookupCaseCode').value.trim();
         const key = document.getElementById('lookupAccessKey').value.trim();
-        if (!code || !key) {
+        if (!code || (!key && !canUseMemberSession())) {
             alert('Please enter both Case Reference Code and Private Access Key.');
             return;
         }
@@ -2630,21 +2651,30 @@ html.light-mode .gm-evidence-meta code {
     };
 
     window.openActiveCaseDashboard = function() {
-        if (!currentCaseCode || !currentAccessKey) return;
+        if (!currentCaseCode || (!currentAccessKey && !canUseMemberSession())) return;
         document.getElementById('lookupCaseCode').value = currentCaseCode;
-        document.getElementById('lookupAccessKey').value = currentAccessKey;
+        document.getElementById('lookupAccessKey').value = currentAccessKey || '';
         switchSupportTab('track');
-        loadCase(currentCaseCode, currentAccessKey);
+        loadCase(currentCaseCode, currentAccessKey || '');
     };
 
     async function loadCase(code, key) {
         currentCaseCode = code;
-        currentAccessKey = key;
+        currentAccessKey = key || '';
         localStorage.setItem('gm_active_case_code', code);
-        localStorage.setItem('gm_active_access_key', key);
+        if (currentAccessKey) {
+            localStorage.setItem('gm_active_access_key', currentAccessKey);
+        }
 
         try {
-            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(code)}?key=${encodeURIComponent(key)}`);
+            const reqHeaders = {};
+            if (currentAccessKey) {
+                reqHeaders['X-Case-Key'] = currentAccessKey;
+            }
+            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(code)}`, {
+                credentials: 'same-origin',
+                headers: reqHeaders
+            });
             if (!res.ok) {
                 if (res.status === 403) throw new Error('Invalid Private Access Key.');
                 if (res.status === 404) throw new Error('Case not found.');
@@ -2822,9 +2852,16 @@ html.light-mode .gm-evidence-meta code {
     };
 
     async function pollCaseUpdates() {
-        if (!currentCaseCode || !currentAccessKey) return;
+        if (!currentCaseCode || (!currentAccessKey && !canUseMemberSession())) return;
         try {
-            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}?key=${encodeURIComponent(currentAccessKey)}`);
+            const reqHeaders = {};
+            if (currentAccessKey) {
+                reqHeaders['X-Case-Key'] = currentAccessKey;
+            }
+            const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}`, {
+                credentials: 'same-origin',
+                headers: reqHeaders
+            });
             if (res.ok) {
                 const data = await res.json();
                 renderCaseDashboard(data);
@@ -2855,28 +2892,36 @@ html.light-mode .gm-evidence-meta code {
         e.preventDefault();
         const input = document.getElementById('chatMessageInput');
         const text = input.value.trim();
-        if ((!text && !selectedChatFile) || !currentCaseCode || !currentAccessKey) return;
+        if ((!text && !selectedChatFile) || !currentCaseCode || (!currentAccessKey && !canUseMemberSession())) return;
 
         const btn = document.getElementById('btnSendChat');
         btn.disabled = true;
         try {
             let res;
+            const authHeaders = {};
+            if (currentAccessKey) {
+                authHeaders['X-Case-Key'] = currentAccessKey;
+            }
             if (selectedChatFile) {
                 const formData = new FormData();
-                formData.append('key', currentAccessKey);
+                if (currentAccessKey) formData.append('key', currentAccessKey);
                 if (text) formData.append('message', text);
                 formData.append('attachment', selectedChatFile);
 
                 res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}/messages`, {
                     method: 'POST',
+                    credentials: 'same-origin',
+                    headers: authHeaders,
                     body: formData
                 });
             } else {
+                authHeaders['Content-Type'] = 'application/json';
                 res = await fetch(`${API_BASE}/cases/${encodeURIComponent(currentCaseCode)}/messages`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    headers: authHeaders,
                     body: JSON.stringify({
-                        key: currentAccessKey,
+                        key: currentAccessKey || '',
                         message: text
                     })
                 });
@@ -2902,8 +2947,11 @@ html.light-mode .gm-evidence-meta code {
     };
 
     window.copyCaseDirectLink = function() {
-        if (!currentCaseCode || !currentAccessKey) return;
-        const url = `${window.location.origin}/support/?case=${encodeURIComponent(currentCaseCode)}&key=${encodeURIComponent(currentAccessKey)}`;
+        if (!currentCaseCode || !currentAccessKey) {
+            alert('Direct share link requires the Private Access Key saved when the case was created.');
+            return;
+        }
+        const url = `${window.location.origin}/support/#case=${encodeURIComponent(currentCaseCode)}&key=${encodeURIComponent(currentAccessKey)}`;
         navigator.clipboard.writeText(url).then(() => {
             const txt = document.getElementById('copyCaseLinkText');
             if (txt) txt.textContent = '✓ Link Copied!';
@@ -2916,8 +2964,11 @@ html.light-mode .gm-evidence-meta code {
     };
 
     window.copyDirectCaseLink = function() {
-        if (!currentCaseCode || !currentAccessKey) return;
-        const url = `${window.location.origin}/support/?case=${encodeURIComponent(currentCaseCode)}&key=${encodeURIComponent(currentAccessKey)}`;
+        if (!currentCaseCode || !currentAccessKey) {
+            alert('Direct share link requires the Private Access Key saved when the case was created.');
+            return;
+        }
+        const url = `${window.location.origin}/support/#case=${encodeURIComponent(currentCaseCode)}&key=${encodeURIComponent(currentAccessKey)}`;
         navigator.clipboard.writeText(url).then(() => {
             const btn = document.getElementById('btnSuccessCopyLink');
             if (btn) btn.innerHTML = '<span>✓ Direct Link Copied!</span>';
@@ -2929,22 +2980,44 @@ html.light-mode .gm-evidence-meta code {
         });
     };
 
-    function checkSavedCase() {
+    function parseDirectCaseParams() {
+        const rawHash = (window.location.hash || '').replace(/^#/, '');
+        if (rawHash && rawHash.includes('case=')) {
+            const hashParams = new URLSearchParams(rawHash);
+            const hCase = hashParams.get('case');
+            const hKey = hashParams.get('key');
+            if (hCase && hKey) {
+                return { caseCode: hCase, accessKey: hKey };
+            }
+        }
         const urlParams = new URLSearchParams(window.location.search);
         const qCase = urlParams.get('case');
         const qKey = urlParams.get('key');
         if (qCase && qKey) {
-            document.getElementById('lookupCaseCode').value = qCase;
-            document.getElementById('lookupAccessKey').value = qKey;
-            loadCase(qCase, qKey);
+            // Scrub secret access key out of query string into client-only URL hash fragment
+            try {
+                const cleanHash = `#case=${encodeURIComponent(qCase)}&key=${encodeURIComponent(qKey)}`;
+                window.history.replaceState(null, '', window.location.pathname + cleanHash);
+            } catch (_) {}
+            return { caseCode: qCase, accessKey: qKey };
+        }
+        return null;
+    }
+
+    function checkSavedCase() {
+        const direct = parseDirectCaseParams();
+        if (direct) {
+            document.getElementById('lookupCaseCode').value = direct.caseCode;
+            document.getElementById('lookupAccessKey').value = direct.accessKey;
+            loadCase(direct.caseCode, direct.accessKey);
             return;
         }
 
         const savedCode = localStorage.getItem('gm_active_case_code');
         const savedKey = localStorage.getItem('gm_active_access_key');
-        if (savedCode && savedKey) {
+        if (savedCode && (savedKey || canUseMemberSession())) {
             document.getElementById('lookupCaseCode').value = savedCode;
-            document.getElementById('lookupAccessKey').value = savedKey;
+            document.getElementById('lookupAccessKey').value = savedKey || '';
             const badge = document.getElementById('activeCaseBadge');
             if (badge) badge.style.display = 'inline-block';
         }
@@ -2977,8 +3050,8 @@ html.light-mode .gm-evidence-meta code {
         fetchMemberCases();
     }
 
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('case') || window.location.hash === '#track') {
+    const initialDirect = parseDirectCaseParams();
+    if (initialDirect || window.location.hash === '#track') {
         switchSupportTab('track');
     } else if (window.location.hash === '#mycases' && window.GHOST_MEMBER && window.GHOST_MEMBER.loggedIn) {
         switchSupportTab('mycases');

@@ -9,7 +9,10 @@ import datetime
 import tempfile
 import glob
 import re
+import shlex
+import base64
 import logging
+from urllib.parse import urlparse
 from pathlib import Path
 
 try:
@@ -24,7 +27,11 @@ class GhostManager:
     def __init__(self, ghost_dir="/var/www/ghost", backups_dir=None):
         self.ghost_dir = os.path.abspath(ghost_dir)
         self.backups_dir = os.path.abspath(backups_dir) if backups_dir else os.path.join(self.ghost_dir, "backups")
-        os.makedirs(self.backups_dir, exist_ok=True)
+        os.makedirs(self.backups_dir, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(self.backups_dir, 0o700)
+        except Exception:
+            pass
 
     def get_config_path(self):
         prod = os.path.join(self.ghost_dir, "config.production.json")
@@ -116,11 +123,12 @@ class GhostManager:
     def run_ghost_cli(self, command):
         """Run ghost cli as the proper non-root user."""
         ghost_user = self.get_ghost_user()
+        quoted_dir = shlex.quote(self.ghost_dir)
 
         if is_root():  # Running as root
-            full_cmd = ["sudo", "-u", ghost_user, "bash", "-c", f"cd '{self.ghost_dir}' && ghost {command}"]
+            full_cmd = ["sudo", "-u", ghost_user, "bash", "-c", f"cd {quoted_dir} && ghost {command}"]
         else:
-            full_cmd = ["bash", "-c", f"cd '{self.ghost_dir}' && ghost {command}"]
+            full_cmd = ["bash", "-c", f"cd {quoted_dir} && ghost {command}"]
 
         try:
             res = subprocess.run(full_cmd, capture_output=True, text=True, timeout=90)
@@ -292,6 +300,11 @@ class GhostManager:
                         clean_rel_path = rel_path.replace(os.sep, "/")
                         zf.write(abs_file, clean_rel_path)
 
+            try:
+                os.chmod(zip_path, 0o600)
+            except Exception:
+                pass
+
             file_size_bytes = os.path.getsize(zip_path)
             file_size_mb = round(file_size_bytes / (1024 * 1024), 2)
             notify(f"✅ Backup complete! Archive size: {file_size_mb} MB")
@@ -334,12 +347,18 @@ class GhostManager:
             notify("⏸️ [1/6] Gracefully stopping Ghost...")
             self.control_service("stop")
 
-            # 2. Extract Archive with Backslash Normalization & Zip Slip Defense
+            # 2. Extract Archive with Backslash Normalization, Symlink Rejection & Zip Bomb Defense
             notify("📂 [2/6] Extracting archive & normalizing paths...")
             bs = chr(92)
             staging_real = os.path.realpath(staging_dir)
+            max_uncompressed_bytes = 2 * 1024 * 1024 * 1024  # 2 GB cap
+            total_extracted = 0
             with zipfile.ZipFile(zip_path, "r") as zf:
                 for m in zf.infolist():
+                    # Reject POSIX symlink entries (S_IFLNK = 0o120000)
+                    unix_filetype = (m.external_attr >> 16) & 0o170000
+                    if unix_filetype == 0o120000:
+                        continue
                     clean_name = m.filename.replace(bs, "/").lstrip("/")
                     if not clean_name:
                         continue
@@ -352,7 +371,14 @@ class GhostManager:
                     else:
                         os.makedirs(os.path.dirname(target), exist_ok=True)
                         with zf.open(m) as src, open(target, "wb") as dst:
-                            dst.write(src.read())
+                            while True:
+                                chunk = src.read(65536)
+                                if not chunk:
+                                    break
+                                total_extracted += len(chunk)
+                                if total_extracted > max_uncompressed_bytes:
+                                    raise Exception("Backup archive exceeds maximum uncompressed size limit (2 GB).")
+                                dst.write(chunk)
 
             target_content = os.path.join(self.ghost_dir, "content")
             staging_content = os.path.join(staging_dir, "content")
@@ -406,13 +432,30 @@ class GhostManager:
             staging_vault = os.path.join(staging_dir, "support_vault")
             if os.path.exists(staging_vault):
                 target_vault = os.path.join(self.ghost_dir, "support_vault")
-                os.makedirs(target_vault, exist_ok=True)
-                for root, dirs, files in os.walk(staging_vault):
+                os.makedirs(target_vault, mode=0o700, exist_ok=True)
+                try:
+                    os.chmod(target_vault, 0o700)
+                except Exception:
+                    pass
+                for root, dirs, files in os.walk(staging_vault, followlinks=False):
+                    dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
                     rel = os.path.relpath(root, staging_vault)
                     dest_dir = os.path.join(target_vault, rel)
-                    os.makedirs(dest_dir, exist_ok=True)
+                    os.makedirs(dest_dir, mode=0o700, exist_ok=True)
+                    try:
+                        os.chmod(dest_dir, 0o700)
+                    except Exception:
+                        pass
                     for f in files:
-                        shutil.copy2(os.path.join(root, f), os.path.join(dest_dir, f))
+                        src_f = os.path.join(root, f)
+                        if os.path.islink(src_f):
+                            continue
+                        dst_f = os.path.join(dest_dir, f)
+                        shutil.copy2(src_f, dst_f)
+                        try:
+                            os.chmod(dst_f, 0o600)
+                        except Exception:
+                            pass
 
             # 5. Restore Database
             notify("💾 [5/6] Restoring database content...")
@@ -545,8 +588,8 @@ class GhostManager:
         if os.path.exists(self.backups_dir):
             files.extend(glob.glob(os.path.join(self.backups_dir, "*.zip")))
 
-        # Also discover any .zip archives in /tmp or /home/*
-        for extra_dir in ["/tmp", "/home/ubuntu"]:
+        # Also discover any .zip archives uploaded via SCP to /home/ubuntu (never world-writable /tmp)
+        for extra_dir in ["/home/ubuntu"]:
             if os.path.exists(extra_dir):
                 files.extend(glob.glob(os.path.join(extra_dir, "*.zip")))
 
@@ -555,6 +598,8 @@ class GhostManager:
         results = []
         for f in files:
             try:
+                if os.path.islink(f) or not os.path.isfile(f):
+                    continue
                 stat = os.stat(f)
                 size_mb = round(stat.st_size / (1024 * 1024), 2)
                 dt = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
@@ -577,8 +622,9 @@ class GhostManager:
 
     def _build_authenticated_git_url(self, repo_url: str, token: str = None) -> str:
         """
-        Formats a clean, authenticated HTTPS URL for GitHub or other Git providers.
-        Supports https://github.com/owner/repo.git, owner/repo, git@github.com:owner/repo.git.
+        Formats a clean, credential-free HTTPS URL for GitHub or other Git providers.
+        Tokens are never embedded into the URL, CLI arguments, or .git/config; instead,
+        _run_git injects HTTP Basic auth ephemerally via GIT_CONFIG_* environment variables.
         """
         if not repo_url:
             return ""
@@ -588,6 +634,9 @@ class GhostManager:
         if clean.startswith("git@"):
             clean = re.sub(r"^git@([^:]+):", r"https://\1/", clean)
 
+        # Strip any legacy embedded credentials in URL (https://user:token@host/...)
+        clean = re.sub(r"^(https?://)[^@/\s]+@", r"\1", clean)
+
         # Handle plain owner/repo format
         if not clean.startswith("http://") and not clean.startswith("https://"):
             clean = f"https://github.com/{clean}"
@@ -596,17 +645,23 @@ class GhostManager:
         if not clean.endswith(".git"):
             clean = f"{clean}.git"
 
-        if token:
-            token = token.strip()
-            # Strip any existing credentials in URL
-            clean_host_path = re.sub(r"^https?://[^@]+@", "", clean)
-            if not clean_host_path.startswith("http"):
-                clean_host_path = f"https://{clean_host_path}"
-
-            # Format for GitHub Personal Access Tokens (x-access-token)
-            clean = clean_host_path.replace("https://", f"https://x-access-token:{token}@")
-
         return clean
+
+    @staticmethod
+    def _validate_git_branch(branch: str) -> str:
+        """Ensure branch name is safe and cannot be interpreted as a Git CLI flag."""
+        b = (branch or "main").strip()
+        if not b or b.startswith("-") or ".." in b or not re.match(r"^[A-Za-z0-9._/-]{1,120}$", b):
+            raise ValueError(f"Invalid Git branch name: {branch!r}")
+        return b
+
+    @staticmethod
+    def _is_safe_sync_path(path: str, sync_real: str) -> bool:
+        """Verify path is not a symlink and resolves strictly inside sync_real."""
+        if os.path.islink(path):
+            return False
+        real = os.path.realpath(path)
+        return real == sync_real or real.startswith(sync_real + os.sep)
 
     def _sanitize_git_output(self, text: str, token: str = None) -> str:
         """Strips credentials, personal access tokens, and sensitive URLs from output."""
@@ -615,16 +670,39 @@ class GhostManager:
         sanitized = str(text)
         if token and token in sanitized:
             sanitized = sanitized.replace(token, "[REDACTED_TOKEN]")
+        if token:
+            b64_tok = base64.b64encode(f"x-access-token:{token.strip()}".encode("utf-8")).decode("ascii")
+            if b64_tok in sanitized:
+                sanitized = sanitized.replace(b64_tok, "[REDACTED_AUTH]")
         # Strip https://...:token@ or https://token@ patterns
         sanitized = re.sub(r"https?://[^@\s]+@", "https://***@", sanitized)
         return sanitized
 
-    def _run_git(self, cmd: list, cwd: str = None, token: str = None, timeout: int = 180) -> dict:
-        """Runs a Git command safely with strict timeouts and sanitized output."""
+    def _run_git(self, cmd: list, cwd: str = None, token: str = None, timeout: int = 180, repo_url: str = None) -> dict:
+        """Runs a Git command safely with ephemeral env-based HTTP auth and sanitized output."""
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = ""
         env["LC_ALL"] = "C"
+
+        if token and token.strip():
+            clean_tok = token.strip()
+            basic_b64 = base64.b64encode(f"x-access-token:{clean_tok}".encode("utf-8")).decode("ascii")
+            host_prefix = "https://github.com/"
+            candidate_url = repo_url or os.getenv("GITHUB_BACKUP_REPO") or ""
+            if not candidate_url:
+                for arg in cmd:
+                    if isinstance(arg, str) and (arg.startswith("https://") or arg.startswith("http://")):
+                        candidate_url = arg
+                        break
+            if candidate_url:
+                norm_url = self._build_authenticated_git_url(candidate_url)
+                parsed = urlparse(norm_url)
+                if parsed.scheme in ("https", "http") and parsed.netloc:
+                    host_prefix = f"{parsed.scheme}://{parsed.netloc}/"
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = f"http.{host_prefix}.extraheader"
+            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: basic {basic_b64}"
 
         try:
             res = subprocess.run(
@@ -668,8 +746,8 @@ class GhostManager:
         if not token:
             return False, "GITHUB_TOKEN is not configured."
 
-        auth_url = self._build_authenticated_git_url(repo_url, token)
-        res = self._run_git(["git", "ls-remote", "--heads", auth_url], timeout=25, token=token)
+        clean_url = self._build_authenticated_git_url(repo_url)
+        res = self._run_git(["git", "ls-remote", "--heads", clean_url], timeout=25, token=token, repo_url=clean_url)
         if res["success"]:
             return True, "Connection verified successfully."
 
@@ -898,33 +976,42 @@ class GhostManager:
                 "error": "GitHub backup repository or token is not configured. Use /github_setup <repo_url> <token>."
             }
 
-        auth_url = self._build_authenticated_git_url(repo_url, token)
+        clean_url = self._build_authenticated_git_url(repo_url)
         sync_dir = os.path.join(self.backups_dir, "github_sync")
-        os.makedirs(self.backups_dir, exist_ok=True)
+        os.makedirs(self.backups_dir, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(self.backups_dir, 0o700)
+        except Exception:
+            pass
 
         try:
+            branch = self._validate_git_branch(branch)
             # 1. Sync / Clone Git Repository
             notify("🔍 [1/6] Connecting to private GitHub repository...")
             git_dir = os.path.join(sync_dir, ".git")
 
             if os.path.exists(git_dir):
-                self._run_git(["git", "remote", "set-url", "origin", auth_url], cwd=sync_dir, token=token)
-                self._run_git(["git", "fetch", "origin", branch], cwd=sync_dir, token=token)
-                self._run_git(["git", "checkout", "-B", branch], cwd=sync_dir, token=token)
-                self._run_git(["git", "pull", "origin", branch], cwd=sync_dir, token=token)
+                self._run_git(["git", "remote", "set-url", "origin", clean_url], cwd=sync_dir, token=token, repo_url=clean_url)
+                self._run_git(["git", "fetch", "origin", branch], cwd=sync_dir, token=token, repo_url=clean_url)
+                self._run_git(["git", "checkout", "-B", branch], cwd=sync_dir, token=token, repo_url=clean_url)
+                self._run_git(["git", "pull", "origin", branch], cwd=sync_dir, token=token, repo_url=clean_url)
             else:
                 if os.path.exists(sync_dir):
                     shutil.rmtree(sync_dir, ignore_errors=True)
-                os.makedirs(sync_dir, exist_ok=True)
+                os.makedirs(sync_dir, mode=0o700, exist_ok=True)
 
-                clone_res = self._run_git(["git", "clone", "--branch", branch, auth_url, sync_dir], token=token)
+                clone_res = self._run_git(["git", "clone", "--branch", branch, clean_url, sync_dir], token=token, repo_url=clean_url)
                 if not clone_res["success"]:
-                    clone_all = self._run_git(["git", "clone", auth_url, sync_dir], token=token)
+                    clone_all = self._run_git(["git", "clone", clean_url, sync_dir], token=token, repo_url=clean_url)
                     if not clone_all["success"]:
-                        self._run_git(["git", "init", sync_dir], token=token)
-                        self._run_git(["git", "remote", "add", "origin", auth_url], cwd=sync_dir, token=token)
+                        self._run_git(["git", "init", sync_dir], token=token, repo_url=clean_url)
+                        self._run_git(["git", "remote", "add", "origin", clean_url], cwd=sync_dir, token=token, repo_url=clean_url)
                 # Ensure we are on the target branch
-                self._run_git(["git", "checkout", "-B", branch], cwd=sync_dir, token=token)
+                self._run_git(["git", "checkout", "-B", branch], cwd=sync_dir, token=token, repo_url=clean_url)
+            try:
+                os.chmod(sync_dir, 0o700)
+            except Exception:
+                pass
 
             # 2. Clean previous working tree content while preserving .git
             for item in os.listdir(sync_dir):
@@ -1092,7 +1179,7 @@ class GhostManager:
 
             self._run_git(["git", "branch", "-M", branch], cwd=sync_dir, token=token)
 
-            push_res = self._run_git(["git", "push", "-u", "origin", branch], cwd=sync_dir, timeout=300, token=token)
+            push_res = self._run_git(["git", "push", "-u", "origin", branch], cwd=sync_dir, timeout=300, token=token, repo_url=clean_url)
             if not push_res["success"]:
                 return {
                     "success": False,
@@ -1139,29 +1226,39 @@ class GhostManager:
                 "error": "GitHub backup repository or token is not configured. Use /github_setup <repo_url> <token>."
             }
 
-        auth_url = self._build_authenticated_git_url(repo_url, token)
+        clean_url = self._build_authenticated_git_url(repo_url)
         sync_dir = os.path.join(self.backups_dir, "github_sync")
-        os.makedirs(self.backups_dir, exist_ok=True)
+        os.makedirs(self.backups_dir, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(self.backups_dir, 0o700)
+        except Exception:
+            pass
 
         try:
+            branch = self._validate_git_branch(branch)
             # 1. Fetch Latest Commits
             notify("🔍 [1/6] Fetching latest publication content from GitHub...")
             git_dir = os.path.join(sync_dir, ".git")
 
             if os.path.exists(git_dir):
-                self._run_git(["git", "remote", "set-url", "origin", auth_url], cwd=sync_dir, token=token)
-                self._run_git(["git", "fetch", "origin", branch], cwd=sync_dir, token=token)
-                self._run_git(["git", "checkout", branch], cwd=sync_dir, token=token)
-                self._run_git(["git", "reset", "--hard", f"origin/{branch}"], cwd=sync_dir, token=token)
-                self._run_git(["git", "clean", "-fd"], cwd=sync_dir, token=token)
+                self._run_git(["git", "remote", "set-url", "origin", clean_url], cwd=sync_dir, token=token, repo_url=clean_url)
+                self._run_git(["git", "fetch", "origin", branch], cwd=sync_dir, token=token, repo_url=clean_url)
+                self._run_git(["git", "checkout", branch], cwd=sync_dir, token=token, repo_url=clean_url)
+                self._run_git(["git", "reset", "--hard", f"origin/{branch}"], cwd=sync_dir, token=token, repo_url=clean_url)
+                self._run_git(["git", "clean", "-fd"], cwd=sync_dir, token=token, repo_url=clean_url)
             else:
                 if os.path.exists(sync_dir):
                     shutil.rmtree(sync_dir, ignore_errors=True)
-                os.makedirs(sync_dir, exist_ok=True)
-                clone_res = self._run_git(["git", "clone", "--branch", branch, auth_url, sync_dir], token=token)
+                os.makedirs(sync_dir, mode=0o700, exist_ok=True)
+                clone_res = self._run_git(["git", "clone", "--branch", branch, clean_url, sync_dir], token=token, repo_url=clean_url)
                 if not clone_res["success"]:
                     return {"success": False, "error": f"Failed to clone repository: {clone_res['stderr'] or clone_res['stdout']}"}
+            try:
+                os.chmod(sync_dir, 0o700)
+            except Exception:
+                pass
 
+            sync_real = os.path.realpath(sync_dir)
             rev_res = self._run_git(["git", "rev-parse", "--short", "HEAD"], cwd=sync_dir, token=token)
             commit_hash = rev_res["stdout"] if rev_res["success"] else "head"
 
@@ -1169,7 +1266,7 @@ class GhostManager:
             notify("⏸️ [2/6] Gracefully stopping Ghost...")
             self.control_service("stop")
 
-            # 3. Restore Database
+            # 3. Restore Database (Symlink-Safe)
             notify("💾 [3/6] Restoring database contents...")
             db_info = self.get_database_info()
             sync_db_dir = os.path.join(sync_dir, "database")
@@ -1185,7 +1282,7 @@ class GhostManager:
                 password = conn.get("password", "")
                 database = conn.get("database", "ghost_production")
 
-                if os.path.exists(sql_file):
+                if os.path.isfile(sql_file) and self._is_safe_sync_path(sql_file, sync_real):
                     cmd = ["mysql", f"-h{host}", f"-P{port}", f"-u{user}", database]
                     env = os.environ.copy()
                     if password:
@@ -1194,7 +1291,7 @@ class GhostManager:
                         proc = subprocess.run(cmd, stdin=sf, capture_output=True, text=True, env=env)
                         if proc.returncode != 0:
                             notify(f"⚠️ MySQL import notice: {proc.stderr}")
-                elif os.path.exists(sqlite_file):
+                elif os.path.isfile(sqlite_file) and self._is_safe_sync_path(sqlite_file, sync_real):
                     self._import_sqlite_to_mysql(sqlite_file, host, port, user, password, database)
 
             elif db_info["client"] == "sqlite3":
@@ -1203,42 +1300,52 @@ class GhostManager:
                 if not target_db or not os.path.isabs(target_db):
                     target_db = os.path.join(self.ghost_dir, target_db or "content/data/ghost.db")
                 os.makedirs(os.path.dirname(target_db), exist_ok=True)
-                if os.path.exists(sqlite_file):
+                if os.path.isfile(sqlite_file) and self._is_safe_sync_path(sqlite_file, sync_real):
                     shutil.copy2(sqlite_file, target_db)
 
-            # 4. Restore Media Images
+            # 4. Restore Media Images (Symlink-Safe)
             notify("🖼️ [4/6] Restoring uploaded media images...")
             target_content = os.path.join(self.ghost_dir, "content")
             sync_images = os.path.join(sync_dir, "images")
             target_images = os.path.join(target_content, "images")
 
-            if os.path.exists(sync_images):
+            if os.path.isdir(sync_images) and self._is_safe_sync_path(sync_images, sync_real):
                 os.makedirs(target_images, exist_ok=True)
-                for root, dirs, files in os.walk(sync_images):
+                for root, dirs, files in os.walk(sync_images, followlinks=False):
+                    dirs[:] = [d for d in dirs if self._is_safe_sync_path(os.path.join(root, d), sync_real)]
                     rel = os.path.relpath(root, sync_images)
                     dest_dir = os.path.join(target_images, rel)
                     os.makedirs(dest_dir, exist_ok=True)
                     for f in files:
-                        shutil.copy2(os.path.join(root, f), os.path.join(dest_dir, f))
+                        src_img = os.path.join(root, f)
+                        if os.path.isfile(src_img) and self._is_safe_sync_path(src_img, sync_real):
+                            shutil.copy2(src_img, os.path.join(dest_dir, f))
 
-            # 5. Restore Settings routes.yaml
+            # 5. Restore Settings routes.yaml (Symlink-Safe)
             sync_routes = os.path.join(sync_dir, "settings", "routes.yaml")
-            if os.path.exists(sync_routes):
+            if os.path.isfile(sync_routes) and self._is_safe_sync_path(sync_routes, sync_real):
                 target_settings = os.path.join(target_content, "settings")
                 os.makedirs(target_settings, exist_ok=True)
                 shutil.copy2(sync_routes, os.path.join(target_settings, "routes.yaml"))
 
-            # 6. Restore Custom Themes (Preserving core symlinks)
+            # 6. Restore Custom Themes (Preserving core symlinks & rejecting repo symlinks)
             notify("🎨 [5/6] Restoring themes (preserving core symlinks)...")
             sync_themes = os.path.join(sync_dir, "themes")
             target_themes = os.path.join(target_content, "themes")
             os.makedirs(target_themes, exist_ok=True)
 
-            if os.path.exists(sync_themes):
+            def _skip_symlinks(cur_dir, names):
+                return [
+                    n for n in names
+                    if os.path.islink(os.path.join(cur_dir, n))
+                    or not self._is_safe_sync_path(os.path.join(cur_dir, n), sync_real)
+                ]
+
+            if os.path.isdir(sync_themes) and self._is_safe_sync_path(sync_themes, sync_real):
                 for t in os.listdir(sync_themes):
                     src_theme = os.path.join(sync_themes, t)
                     dest_theme = os.path.join(target_themes, t)
-                    if os.path.islink(dest_theme):
+                    if os.path.islink(dest_theme) or not self._is_safe_sync_path(src_theme, sync_real):
                         continue
                     if os.path.isdir(src_theme):
                         if os.path.exists(dest_theme):
@@ -1246,7 +1353,7 @@ class GhostManager:
                                 shutil.rmtree(dest_theme, ignore_errors=True)
                             else:
                                 os.remove(dest_theme)
-                        shutil.copytree(src_theme, dest_theme)
+                        shutil.copytree(src_theme, dest_theme, ignore=_skip_symlinks)
                     elif os.path.isfile(src_theme):
                         shutil.copy2(src_theme, dest_theme)
 

@@ -7,6 +7,28 @@ try {
   // fallback if loaded outside core server
 }
 
+const escapeHtml = (val) =>
+  String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const sanitizeEmailUrl = (rawUrl, fallback = '#') => {
+  const trimmed = String(rawUrl ?? '').trim();
+  if (!trimmed || /[\u0000-\u001F\u007F]/.test(trimmed)) {
+    return fallback;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.href;
+    }
+  } catch (_) {}
+  return fallback;
+};
+
 module.exports = ({ email, url, siteTitle, siteUrl, siteLogo }) => {
   try {
     if (!siteTitle && settingsCache) siteTitle = settingsCache.get('title');
@@ -21,8 +43,11 @@ module.exports = ({ email, url, siteTitle, siteUrl, siteLogo }) => {
     }
   } catch (e) {}
 
-  siteTitle = siteTitle || 'Ghost';
-  siteUrl = siteUrl || '#';
+  const safeTitle = escapeHtml(siteTitle || 'Ghost');
+  const safeEmail = escapeHtml(email || '');
+  const safeSiteUrl = escapeHtml(sanitizeEmailUrl(siteUrl, '#'));
+  const safeUrl = escapeHtml(sanitizeEmailUrl(url, '#'));
+  const safeLogo = siteLogo ? escapeHtml(sanitizeEmailUrl(siteLogo, '')) : '';
 
   return `<!doctype html>
 <html>
@@ -58,11 +83,11 @@ module.exports = ({ email, url, siteTitle, siteUrl, siteLogo }) => {
             <!-- BRAND LOGO HEADER -->
             <tr>
               <td align="center" style="padding-bottom: 28px;">
-                ${siteLogo ? `
-                <a href="${siteUrl}" target="_blank" style="text-decoration: none; display: inline-block;">
-                  <img src="${siteLogo}" alt="${siteTitle}" style="max-height: 48px; max-width: 230px; height: auto; width: auto; border: 0; display: block; margin: 0 auto; object-fit: contain;" />
+                ${safeLogo ? `
+                <a href="${safeSiteUrl}" target="_blank" style="text-decoration: none; display: inline-block;">
+                  <img src="${safeLogo}" alt="${safeTitle}" style="max-height: 48px; max-width: 230px; height: auto; width: auto; border: 0; display: block; margin: 0 auto; object-fit: contain;" />
                 </a>` : `
-                <a href="${siteUrl}" target="_blank" style="text-decoration: none; display: inline-block; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">${siteTitle}</a>`}
+                <a href="${safeSiteUrl}" target="_blank" style="text-decoration: none; display: inline-block; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">${safeTitle}</a>`}
               </td>
             </tr>
             <!-- MAIN CARD -->
@@ -72,10 +97,10 @@ module.exports = ({ email, url, siteTitle, siteUrl, siteLogo }) => {
                   <tr>
                     <td>
                       <h1 class="heading" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.025em; margin: 0 0 14px 0; line-height: 1.3;">Confirm your email address</h1>
-                      <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: rgba(255, 255, 255, 0.74); line-height: 1.6; margin: 0 0 28px 0;">Please click the button below to verify your email address (${email}) for ${siteTitle}.</p>
+                      <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: rgba(255, 255, 255, 0.74); line-height: 1.6; margin: 0 0 28px 0;">Please click the button below to verify your email address (${safeEmail}) for ${safeTitle}.</p>
                       
                       <div style="margin-bottom: 28px;">
-                        <a href="${url}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #000000 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 9999px; padding: 14px 34px; letter-spacing: -0.01em; box-shadow: 0 4px 16px rgba(255, 255, 255, 0.16);">Verify email</a>
+                        <a href="${safeUrl}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #000000 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 9999px; padding: 14px 34px; letter-spacing: -0.01em; box-shadow: 0 4px 16px rgba(255, 255, 255, 0.16);">Verify email</a>
                       </div>
 
                       <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: rgba(255, 255, 255, 0.48); line-height: 1.5; margin: 0 0 24px 0;">For your security, this verification link will expire in 24 hours.</p>
@@ -83,7 +108,7 @@ module.exports = ({ email, url, siteTitle, siteUrl, siteLogo }) => {
                       <!-- FALLBACK URL -->
                       <div style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 22px;">
                         <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.5); margin: 0 0 8px 0; line-height: 1.5;">You can also copy & paste this URL into your browser:</p>
-                        <p style="word-break: break-all; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.5; margin: 0; color: rgba(255, 255, 255, 0.65);">${url}</p>
+                        <p style="word-break: break-all; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.5; margin: 0; color: rgba(255, 255, 255, 0.65);">${safeUrl}</p>
                       </div>
                     </td>
                   </tr>

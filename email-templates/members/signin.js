@@ -1,3 +1,25 @@
+const escapeHtml = (val) =>
+  String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const sanitizeEmailUrl = (rawUrl, fallback = '#') => {
+  const trimmed = String(rawUrl ?? '').trim();
+  if (!trimmed || /[\u0000-\u001F\u007F]/.test(trimmed)) {
+    return fallback;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.href;
+    }
+  } catch (_) {}
+  return fallback;
+};
+
 module.exports = ({
   t,
   siteTitle,
@@ -8,7 +30,16 @@ module.exports = ({
   siteDomain,
   siteUrl,
   siteLogo,
-}) => `
+}) => {
+  const safeTitle = escapeHtml(siteTitle || '');
+  const safeEmail = escapeHtml(email || '');
+  const safeOtc = escapeHtml(otc || '');
+  const safeDomain = escapeHtml(siteDomain || '');
+  const safeUrl = escapeHtml(sanitizeEmailUrl(url, '#'));
+  const safeSiteUrl = escapeHtml(sanitizeEmailUrl(siteUrl, '#'));
+  const safeLogo = siteLogo ? escapeHtml(sanitizeEmailUrl(siteLogo, '')) : '';
+
+  return `
 <!doctype html>
 <html>
   <head>
@@ -17,9 +48,9 @@ module.exports = ({
     <meta name="color-scheme" content="dark">
     <meta name="supported-color-schemes" content="dark">
     ${
-      otc
-        ? `<title>🔑 ${t('Sign in to {siteTitle} with code {otc}', { siteTitle, otc, interpolation: { escapeValue: false } })}</title>`
-        : `<title>🔑 ${t('Secure sign in link for {siteTitle}', { siteTitle, interpolation: { escapeValue: false } })}</title>`
+      safeOtc
+        ? `<title>🔑 ${t('Sign in to {siteTitle} with code {otc}', { siteTitle: safeTitle, otc: safeOtc, interpolation: { escapeValue: false } })}</title>`
+        : `<title>🔑 ${t('Secure sign in link for {siteTitle}', { siteTitle: safeTitle, interpolation: { escapeValue: false } })}</title>`
     }
     <style>
 
@@ -66,7 +97,7 @@ module.exports = ({
   </head>
   <body style="background-color: #08090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; font-size: 14px; line-height: 1.6; margin: 0; padding: 0; -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%;">
     <!-- PREHEADER TEXT -->
-    <span style="color: transparent; display: none; height: 0; max-height: 0; max-width: 0; opacity: 0; overflow: hidden; mso-hide: all; visibility: hidden; width: 0;">${otc ? t('Welcome back to {siteTitle}! Your verification code is {otc}.', { siteTitle, otc, interpolation: { escapeValue: false } }) : t('Welcome back to {siteTitle}!', { siteTitle, interpolation: { escapeValue: false } })}</span>
+    <span style="color: transparent; display: none; height: 0; max-height: 0; max-width: 0; opacity: 0; overflow: hidden; mso-hide: all; visibility: hidden; width: 0;">${safeOtc ? t('Welcome back to {siteTitle}! Your verification code is {otc}.', { siteTitle: safeTitle, otc: safeOtc, interpolation: { escapeValue: false } }) : t('Welcome back to {siteTitle}!', { siteTitle: safeTitle, interpolation: { escapeValue: false } })}</span>
     <div style="display:none; max-height:0; overflow:hidden; mso-hide: all;" aria-hidden="true" role="presentation">${'&zwnj;&nbsp;'.repeat(75)}</div>
 
     <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #08090b; width: 100%;">
@@ -77,11 +108,11 @@ module.exports = ({
             <!-- BRAND LOGO / TITLE HEADER -->
             <tr>
               <td align="center" style="padding-bottom: 28px;">
-                ${siteLogo ? `
-                <a href="${siteUrl}" target="_blank" style="text-decoration: none; display: inline-block;">
-                  <img src="${siteLogo}" alt="${siteTitle || ''}" style="max-height: 48px; max-width: 230px; height: auto; width: auto; border: 0; display: block; margin: 0 auto; object-fit: contain;" />
+                ${safeLogo ? `
+                <a href="${safeSiteUrl}" target="_blank" style="text-decoration: none; display: inline-block;">
+                  <img src="${safeLogo}" alt="${safeTitle}" style="max-height: 48px; max-width: 230px; height: auto; width: auto; border: 0; display: block; margin: 0 auto; object-fit: contain;" />
                 </a>` : `
-                <a href="${siteUrl}" target="_blank" style="text-decoration: none; display: inline-block; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">${siteTitle}</a>`}
+                <a href="${safeSiteUrl}" target="_blank" style="text-decoration: none; display: inline-block; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #ffffff;">${safeTitle}</a>`}
               </td>
             </tr>
 
@@ -93,30 +124,30 @@ module.exports = ({
                     <td>
                       <h1 class="heading" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.025em; margin: 0 0 14px 0; line-height: 1.3;">${t('Hey there,')}</h1>
                       ${
-                        otc
-                          ? `<p class="subtext" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: rgba(255, 255, 255, 0.74); line-height: 1.6; margin: 0 0 26px 0;">${t("Welcome back! Here's your code to sign in to {siteTitle}", { siteTitle: '<span style="color: #ffffff; font-weight: 600;">' + siteTitle + '</span>', interpolation: { escapeValue: false } })}</p>
+                        safeOtc
+                          ? `<p class="subtext" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: rgba(255, 255, 255, 0.74); line-height: 1.6; margin: 0 0 26px 0;">${t("Welcome back! Here's your code to sign in to {siteTitle}", { siteTitle: '<span style="color: #ffffff; font-weight: 600;">' + safeTitle + '</span>', interpolation: { escapeValue: false } })}</p>
                           <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 26px;">
                             <tr>
                               <td style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 14px; padding: 22px 18px; text-align: center;">
                                 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(255, 255, 255, 0.45); margin-bottom: 8px;">${t('Verification Code')}</div>
-                                <div class="otc-code" style="font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 34px; font-weight: 800; letter-spacing: 0.22em; color: #ffffff; line-height: 1.1;">${otc}</div>
+                                <div class="otc-code" style="font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 34px; font-weight: 800; letter-spacing: 0.22em; color: #ffffff; line-height: 1.1;">${safeOtc}</div>
                               </td>
                             </tr>
                           </table>
                           <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; color: rgba(255, 255, 255, 0.65); line-height: 1.6; margin: 0 0 20px 0;">${t('Or tap the button below to sign in directly:')}</p>
                           <div style="margin-bottom: 28px;">
-                            <a href="${url}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #000000 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 9999px; padding: 13px 30px; letter-spacing: -0.01em; box-shadow: 0 4px 16px rgba(255, 255, 255, 0.16);">${t('Sign in to {siteTitle}', { siteTitle, interpolation: { escapeValue: false } })}</a>
+                            <a href="${safeUrl}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #000000 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 9999px; padding: 13px 30px; letter-spacing: -0.01em; box-shadow: 0 4px 16px rgba(255, 255, 255, 0.16);">${t('Sign in to {siteTitle}', { siteTitle: safeTitle, interpolation: { escapeValue: false } })}</a>
                           </div>`
-                          : `<p class="subtext" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: rgba(255, 255, 255, 0.74); line-height: 1.6; margin: 0 0 26px 0;">${t('Tap the button below to sign in to {siteTitle} and continue where you left off.', { siteTitle: '<span style="color: #ffffff; font-weight: 600;">' + siteTitle + '</span>', interpolation: { escapeValue: false } })}</p>
+                          : `<p class="subtext" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; color: rgba(255, 255, 255, 0.74); line-height: 1.6; margin: 0 0 26px 0;">${t('Tap the button below to sign in to {siteTitle} and continue where you left off.', { siteTitle: '<span style="color: #ffffff; font-weight: 600;">' + safeTitle + '</span>', interpolation: { escapeValue: false } })}</p>
                           <div style="margin-bottom: 28px;">
-                            <a href="${url}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #000000 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 9999px; padding: 14px 34px; letter-spacing: -0.01em; box-shadow: 0 4px 16px rgba(255, 255, 255, 0.16);">${t('Sign in to {siteTitle}', { siteTitle, interpolation: { escapeValue: false } })}</a>
+                            <a href="${safeUrl}" target="_blank" class="btn-cta" style="display: inline-block; background-color: #ffffff; color: #000000 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; text-decoration: none; border-radius: 9999px; padding: 14px 34px; letter-spacing: -0.01em; box-shadow: 0 4px 16px rgba(255, 255, 255, 0.16);">${t('Sign in to {siteTitle}', { siteTitle: safeTitle, interpolation: { escapeValue: false } })}</a>
                           </div>`
                       }
                       <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: rgba(255, 255, 255, 0.48); line-height: 1.5; margin: 0 0 24px 0;">${t('For your security, the link will expire in 24 hours time.')}</p>
                       <!-- FALLBACK URL -->
                       <div style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 22px;">
                         <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.5); margin: 0 0 8px 0; line-height: 1.5;">${t('You can also copy & paste this URL into your browser:')}</p>
-                        <p style="word-break: break-all; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.5; margin: 0; color: rgba(255, 255, 255, 0.65);">${url}</p>
+                        <p style="word-break: break-all; font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.5; margin: 0; color: rgba(255, 255, 255, 0.65);">${safeUrl}</p>
                       </div>
                     </td>
                   </tr>
@@ -134,7 +165,7 @@ module.exports = ({
                   Contact: <a href="mailto:contact@pedohunters.help" style="color: rgba(255, 255, 255, 0.65); text-decoration: underline;">contact@pedohunters.help</a>
                 </p>
                 <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0 0 6px 0; line-height: 1.5;">${t('If you did not make this request, you can safely ignore this email.')}</p>
-                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0; line-height: 1.5;">${t('This message was sent from {siteDomain} to {email}.', { siteDomain: '<a href="' + siteUrl + '" style="color: rgba(255, 255, 255, 0.65); text-decoration: underline;">' + siteDomain + '</a>', email: '<span style="color: rgba(255, 255, 255, 0.65);">' + email + '</span>', interpolation: { escapeValue: false } })}</p>
+                <p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.42); margin: 0; line-height: 1.5;">${t('This message was sent from {siteDomain} to {email}.', { siteDomain: '<a href="' + safeSiteUrl + '" style="color: rgba(255, 255, 255, 0.65); text-decoration: underline;">' + safeDomain + '</a>', email: '<span style="color: rgba(255, 255, 255, 0.65);">' + safeEmail + '</span>', interpolation: { escapeValue: false } })}</p>
               </td>
             </tr>
 
@@ -145,3 +176,4 @@ module.exports = ({
   </body>
 </html>
 `;
+};

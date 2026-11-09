@@ -174,45 +174,50 @@
 
         // Step D: Render clean, compact, black & white cards
         const cardsHtml = mergedList.map(member => {
-            const authorUrl = member.url;
+            const authorUrl = sanitizeUrl(member.url, true);
+            const safeTelegram = sanitizeUrl(member.telegram, false);
+            const safeTwitter = sanitizeUrl(member.twitter, false);
+            const safeGithub = sanitizeUrl(member.github, false);
+            const safeWebsite = sanitizeUrl(member.website, false);
+            const safeAvatar = sanitizeUrl(member.avatar, true);
 
             // Social links (Clean Monochromatic Icons)
             let linksHtml = '';
-            if (member.telegram) {
+            if (safeTelegram) {
                 linksHtml += `
-                    <a href="${escapeHtml(member.telegram)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Telegram" title="Telegram">
+                    <a href="${escapeHtml(safeTelegram)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Telegram" title="Telegram">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
                     </a>`;
             }
-            if (member.twitter) {
+            if (safeTwitter) {
                 linksHtml += `
-                    <a href="${escapeHtml(member.twitter)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Twitter / X" title="X">
+                    <a href="${escapeHtml(safeTwitter)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Twitter / X" title="X">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"/></svg>
                     </a>`;
             }
-            if (member.github) {
+            if (safeGithub) {
                 linksHtml += `
-                    <a href="${escapeHtml(member.github)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="GitHub" title="GitHub">
+                    <a href="${escapeHtml(safeGithub)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="GitHub" title="GitHub">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
                     </a>`;
             }
-            if (member.website) {
+            if (safeWebsite) {
                 linksHtml += `
-                    <a href="${escapeHtml(member.website)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Website" title="Website">
+                    <a href="${escapeHtml(safeWebsite)}" target="_blank" rel="noopener noreferrer" class="gm-team-social-btn" aria-label="Website" title="Website">
                         <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                     </a>`;
             }
 
             // Avatar element
             let avatarMarkup = '';
-            if (member.avatar) {
-                avatarMarkup = `<img class="gm-team-avatar" src="${escapeHtml(member.avatar)}" alt="${escapeHtml(member.name)}" loading="lazy">`;
+            if (safeAvatar) {
+                avatarMarkup = `<img class="gm-team-avatar" src="${escapeHtml(safeAvatar)}" alt="${escapeHtml(member.name)}" loading="lazy">`;
             } else {
-                const cleanWords = member.name.replace(/[^a-zA-Z0-9 ]/g, ' ').trim().split(/\s+/);
+                const cleanWords = String(member.name || '').replace(/[^a-zA-Z0-9 ]/g, ' ').trim().split(/\s+/);
                 const first = cleanWords[0] ? cleanWords[0][0] : 'O';
-                const last = cleanWords.length > 1 ? cleanWords[cleanWords.length - 1][0] : (cleanWords[0].length > 1 ? cleanWords[0][1] : 'P');
+                const last = cleanWords.length > 1 ? cleanWords[cleanWords.length - 1][0] : (cleanWords[0] && cleanWords[0].length > 1 ? cleanWords[0][1] : 'P');
                 const finalInitials = (first + last).toUpperCase();
-                avatarMarkup = `<div class="gm-team-avatar gm-team-avatar-initials">${finalInitials}</div>`;
+                avatarMarkup = `<div class="gm-team-avatar gm-team-avatar-initials">${escapeHtml(finalInitials)}</div>`;
             }
 
             // Primary action button
@@ -223,9 +228,9 @@
                         <span>View Profile</span>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     </a>`;
-            } else if (member.telegram || member.website) {
+            } else if (safeTelegram || safeWebsite) {
                 ctaHtml = `
-                    <a href="${escapeHtml(member.telegram || member.website)}" target="_blank" rel="noopener noreferrer" class="gm-team-cta-btn">
+                    <a href="${escapeHtml(safeTelegram || safeWebsite)}" target="_blank" rel="noopener noreferrer" class="gm-team-cta-btn">
                         <span>Contact</span>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     </a>`;
@@ -267,6 +272,24 @@
 
         container.innerHTML = cardsHtml;
         container.setAttribute('data-team-loaded', 'true');
+    }
+
+    function sanitizeUrl(rawUrl, allowRelative) {
+        if (!rawUrl || typeof rawUrl !== 'string') return '';
+        const trimmed = rawUrl.trim();
+        if (!trimmed) return '';
+        // Reject embedded control characters or whitespace-obfuscated schemes
+        if (/[\u0000-\u001F\u007F]/.test(trimmed)) return '';
+        if (allowRelative && trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+            return trimmed;
+        }
+        try {
+            const parsed = new URL(trimmed, window.location.origin);
+            if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+                return parsed.href;
+            }
+        } catch (_) {}
+        return '';
     }
 
     function escapeHtml(str) {

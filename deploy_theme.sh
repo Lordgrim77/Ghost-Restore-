@@ -4,7 +4,7 @@
 # Repository: https://github.com/Lordgrim77/Ghost-Restore-
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
 # Terminal Colors
 RED='\033[0;31m'
@@ -24,21 +24,93 @@ GHOST_DIR="/var/www/ghost"
 THEME_DIR="$GHOST_DIR/content/themes/alto"
 RAW_BASE="https://raw.githubusercontent.com/Lordgrim77/Ghost-Restore-/main"
 CACHE_BUSTER=$(date +%s)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
+
+STAGE_DIR="$(mktemp -d /tmp/ghost_deploy.XXXXXXXXXX)"
+chmod 700 "$STAGE_DIR"
+trap 'rm -rf "$STAGE_DIR"' EXIT
+
+# Optional GITHUB_TOKEN discovery from existing .env for private repo raw fetches
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    for env_cand in "$GHOST_DIR/Ghost-Restore/.env" "/opt/ghost-telegram-bot/.env" "$GHOST_DIR/.env"; do
+        if [ -f "$env_cand" ] && [ ! -L "$env_cand" ]; then
+            GITHUB_TOKEN=$(sudo grep -E '^\s*GITHUB_TOKEN\s*=' "$env_cand" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d ' "'"'" || true)
+            [ -n "$GITHUB_TOKEN" ] && break
+        fi
+    done
+fi
+
+fetch_verified_asset() {
+    local rel_name="$1"
+    local dest_path="$2"
+    local kind="${3:-raw}"
+    local tmp_out="$STAGE_DIR/$(basename "$rel_name").part"
+    rm -f "$tmp_out"
+
+    if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/$rel_name" ] && [ ! -L "$SCRIPT_DIR/$rel_name" ]; then
+        cp -f "$SCRIPT_DIR/$rel_name" "$tmp_out"
+    else
+        local curl_args=(-fsSL --retry 3 -H "Cache-Control: no-cache")
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+            if ! printf 'header = "Authorization: token %s"\nurl = "%s/%s?v=%s"\n' "$GITHUB_TOKEN" "$RAW_BASE" "$rel_name" "$CACHE_BUSTER" | curl "${curl_args[@]}" -K - -o "$tmp_out" 2>/dev/null; then
+                curl "${curl_args[@]}" "$RAW_BASE/$rel_name?v=$CACHE_BUSTER" -o "$tmp_out"
+            fi
+        else
+            curl "${curl_args[@]}" "$RAW_BASE/$rel_name?v=$CACHE_BUSTER" -o "$tmp_out"
+        fi
+    fi
+
+    if [ ! -s "$tmp_out" ]; then
+        echo -e "  ${RED}✗ Empty or failed download for $rel_name${NC}" >&2
+        return 1
+    fi
+
+    case "$kind" in
+        zip)
+            python3 -c 'import sys, zipfile; sys.exit(0 if zipfile.is_zipfile(sys.argv[1]) else 1)' "$tmp_out"
+            ;;
+        py)
+            python3 -m py_compile "$tmp_out"
+            ;;
+        text)
+            python3 -c '
+import sys
+data = open(sys.argv[1], "rb").read(256)
+sys.exit(1 if data.strip() in (b"404: Not Found", b"Not Found") else 0)
+' "$tmp_out"
+            ;;
+    esac
+
+    sudo mkdir -p "$(dirname "$dest_path")"
+    sudo cp -f "$tmp_out" "$dest_path"
+    rm -f "$tmp_out"
+}
 
 # 1. Download and extract theme
-echo -e "${BLUE}[1/6] Downloading latest Alto theme package...${NC}"
+echo -e "${BLUE}[1/8] Downloading & verifying latest Alto theme package...${NC}"
 sudo mkdir -p "$THEME_DIR"
-sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/alto-theme-latest.zip?v=$CACHE_BUSTER" -o /tmp/alto-theme-latest.zip
+THEME_ZIP="$STAGE_DIR/alto-theme-latest.zip"
+fetch_verified_asset "alto-theme-latest.zip" "$THEME_ZIP" "zip"
 
-echo -e "${BLUE}[2/6] Unpacking cleanly into $THEME_DIR...${NC}"
+echo -e "${BLUE}[2/8] Unpacking cleanly into $THEME_DIR...${NC}"
 sudo find "$THEME_DIR" -type f -name "*\\*" -delete 2>/dev/null || true
-sudo python3 -c "
-import zipfile, os
-theme_real = os.path.realpath('$THEME_DIR')
-with zipfile.ZipFile('/tmp/alto-theme-latest.zip', 'r') as zf:
+sudo python3 - "$THEME_ZIP" "$THEME_DIR" <<'PYEOF'
+import zipfile, os, sys
+
+zip_src = sys.argv[1]
+theme_dir = sys.argv[2]
+theme_real = os.path.realpath(theme_dir)
+max_bytes = 512 * 1024 * 1024
+total = 0
+
+with zipfile.ZipFile(zip_src, 'r') as zf:
     for item in zf.infolist():
-        clean_name = item.filename.replace('\\\\', '/').lstrip('/')
-        target_path = os.path.realpath(os.path.join('$THEME_DIR', clean_name))
+        if ((item.external_attr >> 16) & 0o170000) == 0o120000:
+            continue
+        clean_name = item.filename.replace('\\', '/').lstrip('/')
+        if not clean_name or clean_name.startswith('scratch/') or clean_name.startswith('.git/'):
+            continue
+        target_path = os.path.realpath(os.path.join(theme_dir, clean_name))
         if not (target_path.startswith(theme_real + os.sep) or target_path == theme_real):
             continue
         if item.is_dir() or clean_name.endswith('/'):
@@ -46,29 +118,38 @@ with zipfile.ZipFile('/tmp/alto-theme-latest.zip', 'r') as zf:
         else:
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             with zf.open(item) as src, open(target_path, 'wb') as dst:
-                dst.write(src.read())
-"
-sudo rm -f /tmp/alto-theme-latest.zip
+                while True:
+                    chunk = src.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise RuntimeError("Theme archive exceeded size limit")
+                    dst.write(chunk)
+PYEOF
+sudo rm -f "$THEME_ZIP"
 
 # Ensure clean page-support.hbs, page-about.hbs, and page-team.hbs are in place
-sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/page-support.hbs?v=$CACHE_BUSTER" -o "$THEME_DIR/page-support.hbs"
-sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/page-about.hbs?v=$CACHE_BUSTER" -o "$THEME_DIR/page-about.hbs" 2>/dev/null || true
-sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/page-team.hbs?v=$CACHE_BUSTER" -o "$THEME_DIR/page-team.hbs" 2>/dev/null || true
+fetch_verified_asset "page-support.hbs" "$THEME_DIR/page-support.hbs" "text"
+fetch_verified_asset "page-about.hbs" "$THEME_DIR/page-about.hbs" "text" || true
+fetch_verified_asset "page-team.hbs" "$THEME_DIR/page-team.hbs" "text" || true
 
 # 2. Update routes.yaml if settings dir exists
-echo -e "${BLUE}[3/6] Configuring content routes (routes.yaml)...${NC}"
+echo -e "${BLUE}[3/8] Configuring content routes (routes.yaml)...${NC}"
 if [ -d "$GHOST_DIR/content/settings" ]; then
-    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/routes.yaml?v=$CACHE_BUSTER" -o "$GHOST_DIR/content/settings/routes.yaml" 2>/dev/null || true
+    fetch_verified_asset "routes.yaml" "$GHOST_DIR/content/settings/routes.yaml" "text" || true
     sudo chown ghost:ghost "$GHOST_DIR/content/settings/routes.yaml" 2>/dev/null || true
 fi
 
 # 3. Email Templates & Core overrides
-echo -e "${BLUE}[4/6] Installing redesigned email templates and core overrides...${NC}"
-if sudo curl -sSL -f -H "Cache-Control: no-cache" "$RAW_BASE/email-templates.zip?v=$CACHE_BUSTER" -o /tmp/email-templates.zip 2>/dev/null; then
-    sudo python3 -c "
-import os, sys, urllib.request, tarfile, io, zipfile
+echo -e "${BLUE}[4/8] Installing redesigned email templates and core overrides...${NC}"
+EMAIL_ZIP="$STAGE_DIR/email-templates.zip"
+if fetch_verified_asset "email-templates.zip" "$EMAIL_ZIP" "zip" 2>/dev/null; then
+    sudo python3 - "$GHOST_DIR" "$EMAIL_ZIP" <<'PYEOF'
+import os, sys, urllib.request, tarfile, io, zipfile, re
 
-ghost_dir = '$GHOST_DIR'
+ghost_dir = sys.argv[1]
+zip_path = sys.argv[2]
 current_dir = os.path.join(ghost_dir, 'current')
 
 # 1. Detect Ghost version
@@ -80,9 +161,12 @@ elif os.path.isdir(os.path.join(ghost_dir, 'versions')):
     if versions:
         version = versions[-1]
 
-print(f'  Ghost version detected: {version or \"unknown\"}')
+if version and not re.match(r'^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$', version):
+    version = None
 
-stock_core_files = [
+print(f'  Ghost version detected: {version or "unknown"}')
+
+stock_core_files = {
     'core/server/services/gifts/index.js',
     'core/server/services/gifts/gift-email-service.js',
     'core/server/services/members/api.js',
@@ -96,7 +180,7 @@ stock_core_files = [
     'core/server/services/member-welcome-emails/member-welcome-email-renderer.js',
     'core/frontend/meta/og-image.js',
     'core/frontend/meta/twitter-image.js',
-]
+}
 
 gifts_index = os.path.join(current_dir, 'core', 'server', 'services', 'gifts', 'index.js')
 is_corrupted = False
@@ -109,18 +193,23 @@ if os.path.isfile(gifts_index):
     except Exception:
         pass
 
+current_real = os.path.realpath(current_dir)
 if version and (is_corrupted or not os.path.exists(gifts_index)):
     print(f'  [*] Self-healing: Restoring clean core modules for Ghost {version}...')
     url = f'https://registry.npmjs.org/ghost/-/ghost-{version}.tgz'
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Ghost-Deploy-Heal'})
         with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read()
+            data = resp.read(200 * 1024 * 1024)
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as tf:
             for m in tf.getmembers():
-                clean_name = m.name.replace('package/', '')
+                if not m.isfile():
+                    continue
+                clean_name = m.name.replace('package/', '', 1)
                 if clean_name in stock_core_files:
-                    dest = os.path.join(current_dir, clean_name)
+                    dest = os.path.realpath(os.path.join(current_real, clean_name))
+                    if not dest.startswith(current_real + os.sep):
+                        continue
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     with tf.extractfile(m) as src, open(dest, 'wb') as dst:
                         dst.write(src.read())
@@ -128,35 +217,46 @@ if version and (is_corrupted or not os.path.exists(gifts_index)):
     except Exception as err:
         print(f'  ⚠️ Core recovery warning: {err}')
 
-# 2. Extract clean email templates & safe overrides
+# 2. Extract clean email templates & safe overrides with Zip Slip & Symlink protection
 core_base = os.path.join(ghost_dir, 'current', 'core')
 server_base = os.path.join(ghost_dir, 'current', 'core', 'server')
-zip_path = '/tmp/email-templates.zip'
 if os.path.exists(core_base) and os.path.exists(zip_path):
+    core_real = os.path.realpath(core_base)
+    server_real = os.path.realpath(server_base)
+    blocked_prefixes = (
+        'services/gifts/index.js',
+        'services/members/api.js',
+        'lib/mail/ghost-mailer.js',
+    )
     with zipfile.ZipFile(zip_path, 'r') as zf:
         for item in zf.infolist():
-            clean_name = item.filename.replace('\\\\', '/').lstrip('/')
-            # Never allow core service files to be overwritten by zip
-            if clean_name.startswith('services/gifts/index.js') or clean_name.startswith('services/members/api.js') or clean_name.startswith('lib/mail/ghost-mailer.js'):
+            if ((item.external_attr >> 16) & 0o170000) == 0o120000:
+                continue
+            clean_name = item.filename.replace('\\', '/').lstrip('/')
+            if not clean_name or clean_name.startswith(blocked_prefixes):
                 continue
             if clean_name.startswith('frontend/'):
-                dest = os.path.join(core_base, clean_name)
+                base_real = core_real
+                dest = os.path.realpath(os.path.join(core_real, clean_name))
             else:
-                dest = os.path.join(server_base, clean_name)
+                base_real = server_real
+                dest = os.path.realpath(os.path.join(server_real, clean_name))
+            if not (dest.startswith(base_real + os.sep) or dest == base_real):
+                continue
             if item.is_dir() or clean_name.endswith('/'):
                 os.makedirs(dest, exist_ok=True)
             else:
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with zf.open(item) as src, open(dest, 'wb') as dst:
                     dst.write(src.read())
-"
-    sudo rm -f /tmp/email-templates.zip
+PYEOF
+    sudo rm -f "$EMAIL_ZIP"
     sudo chown -R ghost:ghost "$GHOST_DIR/current/core/" 2>/dev/null || true
 fi
 
 # 4. Social Thumbnail Image
 sudo mkdir -p "$GHOST_DIR/content/images"
-if sudo curl -sSL -f -H "Cache-Control: no-cache" "$RAW_BASE/og-image.png?v=$CACHE_BUSTER" -o "$GHOST_DIR/content/images/og-image.png" 2>/dev/null; then
+if fetch_verified_asset "og-image.png" "$GHOST_DIR/content/images/og-image.png" "raw" 2>/dev/null; then
     sudo chown ghost:ghost "$GHOST_DIR/content/images/og-image.png"
     sudo chmod 664 "$GHOST_DIR/content/images/og-image.png"
 fi
@@ -165,10 +265,14 @@ fi
 sudo chown -R ghost:ghost "$THEME_DIR"
 sudo chmod -R 775 "$THEME_DIR"
 
-# 5. Dynamic Ghost Settings & Navigation Sync
-echo -e "${BLUE}[5/6] Syncing database settings, navigation, and pages...${NC}"
-sudo python3 -c '
+# 5. Dynamic Ghost Settings & Navigation Sync (MYSQL_PWD via env, never -p CLI arg)
+echo -e "${BLUE}[5/8] Syncing database settings, navigation, and pages...${NC}"
+sudo python3 - <<'PYEOF' 2>/dev/null || true
 import json, subprocess, os
+
+def sql_quote(val: str) -> str:
+    s = str(val or "").replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
+    return f"'{s}'"
 
 config_path = "/var/www/ghost/config.production.json"
 if os.path.isfile(config_path):
@@ -176,26 +280,30 @@ if os.path.isfile(config_path):
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         db_cfg = cfg.get("database", {}).get("connection", {})
-        db_name = db_cfg.get("database", "ghost_production")
-        db_user = db_cfg.get("user", "root")
-        db_pass = db_cfg.get("password", "")
-        ghost_url = cfg.get("url", "").rstrip("/")
+        db_host = str(db_cfg.get("host", "localhost"))
+        db_port = str(db_cfg.get("port", 3306))
+        db_name = str(db_cfg.get("database", "ghost_production"))
+        db_user = str(db_cfg.get("user", "root"))
+        db_pass = str(db_cfg.get("password", ""))
+        ghost_url = str(cfg.get("url", "")).rstrip("/")
 
-        mysql_cmd = ["mysql", f"-u{db_user}"]
+        mysql_cmd = ["mysql", f"-h{db_host}", f"-P{db_port}", f"-u{db_user}", db_name]
+        mysql_env = os.environ.copy()
         if db_pass:
-            mysql_cmd.append(f"-p{db_pass}")
-        mysql_cmd.append(db_name)
+            mysql_env["MYSQL_PWD"] = db_pass
 
-        # Update accent color & signup access
-        sql_updates = f"""
-        UPDATE settings SET value = "#ffffff" WHERE \`key\` = "accent_color";
-        UPDATE settings SET value = "all" WHERE \`key\` = "members_signup_access";
-        UPDATE settings SET value = "{ghost_url}/content/images/og-image.png" WHERE \`key\` IN ("cover_image", "og_image", "twitter_image");
-        """
-        subprocess.run(mysql_cmd + ["-e", sql_updates], capture_output=True)
+        og_full_url = f"{ghost_url}/content/images/og-image.png"
+        sql_updates = (
+            "UPDATE settings SET value = '#ffffff' WHERE `key` = 'accent_color';\n"
+            "UPDATE settings SET value = 'all' WHERE `key` = 'members_signup_access';\n"
+            f"UPDATE settings SET value = {sql_quote(og_full_url)} WHERE `key` IN ('cover_image', 'og_image', 'twitter_image');\n"
+        )
+        subprocess.run(mysql_cmd, input=sql_updates, text=True, capture_output=True, env=mysql_env)
 
-        # Ensure navigation links
-        res = subprocess.run(mysql_cmd + ["-Nse", "SELECT value FROM settings WHERE \`key\`=\"navigation\""], capture_output=True, text=True)
+        res = subprocess.run(
+            mysql_cmd + ["-Nse", "SELECT value FROM settings WHERE `key`='navigation'"],
+            capture_output=True, text=True, env=mysql_env
+        )
         if res.stdout.strip():
             nav = json.loads(res.stdout.strip())
             urls = [item.get("url") for item in nav]
@@ -207,32 +315,31 @@ if os.path.isfile(config_path):
                 nav.append({"label": "Support", "url": "/support/"})
                 changed = True
             if changed:
-                new_nav = json.dumps(nav)
-                subprocess.run(mysql_cmd + ["-e", f"UPDATE settings SET value={json.dumps(new_nav)} WHERE \`key\`=\"navigation\""], capture_output=True)
+                new_nav_sql = f"UPDATE settings SET value = {sql_quote(json.dumps(nav))} WHERE `key` = 'navigation';\n"
+                subprocess.run(mysql_cmd, input=new_nav_sql, text=True, capture_output=True, env=mysql_env)
 
-        # Ensure /support/ and /team/ published pages exist in database
         page_sql = """
         INSERT IGNORE INTO posts (
             id, uuid, title, slug, lexical, html, plaintext, comment_id, featured, type, status, visibility, email_recipient_filter, created_at, updated_at, published_at, published_by, show_title_and_feature_image
-        ) SELECT 
-            "6ae71fbd6a4691255cb0ca98", UUID(), "Support & Incident Intake", "support", lexical, html, plaintext, "6ae71fbd6a4691255cb0ca98", 0, "page", "published", "public", "all", NOW(), NOW(), NOW(), published_by, 1
-        FROM posts WHERE slug = "about" LIMIT 1;
+        ) SELECT
+            '6ae71fbd6a4691255cb0ca98', UUID(), 'Support & Incident Intake', 'support', lexical, html, plaintext, '6ae71fbd6a4691255cb0ca98', 0, 'page', 'published', 'public', 'all', NOW(), NOW(), NOW(), published_by, 1
+        FROM posts WHERE slug = 'about' LIMIT 1;
 
         INSERT IGNORE INTO posts (
             id, uuid, title, slug, lexical, html, plaintext, comment_id, featured, type, status, visibility, email_recipient_filter, created_at, updated_at, published_at, published_by, show_title_and_feature_image
-        ) SELECT 
-            "6ae71fbd6a4691255cb0ca77", UUID(), "Our Team", "team", lexical, html, plaintext, "6ae71fbd6a4691255cb0ca77", 0, "page", "published", "public", "all", NOW(), NOW(), NOW(), published_by, 1
-        FROM posts WHERE slug = "about" LIMIT 1;
+        ) SELECT
+            '6ae71fbd6a4691255cb0ca77', UUID(), 'Our Team', 'team', lexical, html, plaintext, '6ae71fbd6a4691255cb0ca77', 0, 'page', 'published', 'public', 'all', NOW(), NOW(), NOW(), published_by, 1
+        FROM posts WHERE slug = 'about' LIMIT 1;
         """
-        subprocess.run(mysql_cmd + ["-e", page_sql], capture_output=True)
+        subprocess.run(mysql_cmd, input=page_sql, text=True, capture_output=True, env=mysql_env)
 
     except Exception as e:
         print(f"  Note: Database sync skipped ({e})")
-' 2>/dev/null || true
+PYEOF
 
 # 6. Configure Nginx Reverse Proxy for /api/support/
-echo -e "${BLUE}[6/6] Ensuring Nginx reverse proxy is configured for /api/support/...${NC}"
-sudo python3 -c '
+echo -e "${BLUE}[6/8] Ensuring Nginx reverse proxy is configured for /api/support/...${NC}"
+sudo python3 - <<'PYEOF' 2>/dev/null || true
 import sys, re, os, glob
 
 conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/nginx/conf.d"]
@@ -282,13 +389,16 @@ for cdir in conf_dirs:
 
 if patched:
     os.system("nginx -t >/dev/null 2>&1 && systemctl reload nginx")
-' 2>/dev/null || true
+PYEOF
 
 # 7. Update Support Hub Daemon & Cryptographic Engine
 echo -e "${BLUE}[7/8] Updating Support Hub Daemon & Verification Engine...${NC}"
 sudo mkdir -p "$GHOST_DIR/Ghost-Restore"
+sudo mkdir -p "$GHOST_DIR/backups"
 sudo mkdir -p "$GHOST_DIR/support_vault/evidence"
-sudo chmod -R 775 "$GHOST_DIR/support_vault" 2>/dev/null || true
+sudo chown -R root:root "$GHOST_DIR/support_vault" 2>/dev/null || true
+sudo chmod 700 "$GHOST_DIR/backups" "$GHOST_DIR/support_vault" "$GHOST_DIR/support_vault/evidence" 2>/dev/null || true
+sudo find "$GHOST_DIR/support_vault" -type f -exec chmod 600 {} + 2>/dev/null || true
 
 # Target directories to sync backend files
 SYNC_DIRS=("$GHOST_DIR/Ghost-Restore")
@@ -300,9 +410,11 @@ BOT_SVC_FILE="/etc/systemd/system/ghost-telegram-bot.service"
 if [ -f "$BOT_SVC_FILE" ]; then
     SVC_DIR=$(grep -E '^\s*WorkingDirectory\s*=' "$BOT_SVC_FILE" | head -n 1 | cut -d= -f2 | tr -d ' ' || echo "")
     if [ -n "$SVC_DIR" ] && [ -d "$SVC_DIR" ]; then
-        if [[ ! " ${SYNC_DIRS[@]} " =~ " ${SVC_DIR} " ]]; then
-            SYNC_DIRS+=("$SVC_DIR")
-        fi
+        already_in=0
+        for existing_d in "${SYNC_DIRS[@]}"; do
+            [ "$existing_d" = "$SVC_DIR" ] && already_in=1
+        done
+        [ "$already_in" -eq 0 ] && SYNC_DIRS+=("$SVC_DIR")
     fi
 fi
 
@@ -311,15 +423,14 @@ if command -v apt-get >/dev/null 2>&1; then
     sudo apt-get install -y -q python3 python3-pip python3-venv curl >/dev/null 2>&1 || true
 fi
 
-# Download all required daemon files across target directories
+# Download and syntax-verify all required daemon files across target directories
 for sdir in "${SYNC_DIRS[@]}"; do
     sudo mkdir -p "$sdir"
-    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/support_hub.py?v=$CACHE_BUSTER" -o "$sdir/support_hub.py"
-    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/bot.py?v=$CACHE_BUSTER" -o "$sdir/bot.py"
-    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/ghost_manager.py?v=$CACHE_BUSTER" -o "$sdir/ghost_manager.py"
-    sudo curl -sSL -H "Cache-Control: no-cache" "$RAW_BASE/requirements.txt?v=$CACHE_BUSTER" -o "$sdir/requirements.txt"
+    fetch_verified_asset "support_hub.py" "$sdir/support_hub.py" "py"
+    fetch_verified_asset "bot.py" "$sdir/bot.py" "py"
+    fetch_verified_asset "ghost_manager.py" "$sdir/ghost_manager.py" "py"
+    fetch_verified_asset "requirements.txt" "$sdir/requirements.txt" "text"
 
-    # Ensure venv exists and packages are installed
     if [ ! -d "$sdir/venv" ]; then
         sudo python3 -m venv "$sdir/venv" 2>/dev/null || true
     fi
@@ -327,22 +438,28 @@ for sdir in "${SYNC_DIRS[@]}"; do
         sudo "$sdir/venv/bin/pip" install --upgrade pip -q 2>/dev/null || true
         sudo "$sdir/venv/bin/pip" install -r "$sdir/requirements.txt" -q 2>/dev/null || true
     fi
-    # Also install to system python as backup
     sudo pip3 install -r "$sdir/requirements.txt" --break-system-packages -q 2>/dev/null || sudo pip3 install -r "$sdir/requirements.txt" -q 2>/dev/null || true
 
-    # Sync .env across candidate directories if missing
+    # Sync .env across candidate directories if missing and enforce 0600 permissions
     if [ ! -f "$sdir/.env" ]; then
         if [ -f "$GHOST_DIR/Ghost-Restore/.env" ]; then
-            sudo cp "$GHOST_DIR/Ghost-Restore/.env" "$sdir/.env"
+            sudo install -m 600 "$GHOST_DIR/Ghost-Restore/.env" "$sdir/.env"
         elif [ -f "/opt/ghost-telegram-bot/.env" ]; then
-            sudo cp "/opt/ghost-telegram-bot/.env" "$sdir/.env"
+            sudo install -m 600 "/opt/ghost-telegram-bot/.env" "$sdir/.env"
         elif [ -f "$GHOST_DIR/.env" ]; then
-            sudo cp "$GHOST_DIR/.env" "$sdir/.env"
+            sudo install -m 600 "$GHOST_DIR/.env" "$sdir/.env"
         fi
+    else
+        sudo chmod 600 "$sdir/.env" 2>/dev/null || true
     fi
 done
 
-# Ensure fallback ghost-support.service unit is always installed
+SUPPORT_PY_BIN="/usr/bin/python3"
+if [ -x "$GHOST_DIR/Ghost-Restore/venv/bin/python3" ]; then
+    SUPPORT_PY_BIN="$GHOST_DIR/Ghost-Restore/venv/bin/python3"
+fi
+
+# Ensure fallback ghost-support.service unit is installed with PrivateTmp & strict UMask
 cat <<EOF | sudo tee /etc/systemd/system/ghost-support.service >/dev/null
 [Unit]
 Description=Ghost Support Hub REST API Daemon
@@ -352,7 +469,9 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$GHOST_DIR/Ghost-Restore
-ExecStart=/usr/bin/python3 $GHOST_DIR/Ghost-Restore/support_hub.py --port 8080 --ghost-dir $GHOST_DIR
+ExecStart=$SUPPORT_PY_BIN $GHOST_DIR/Ghost-Restore/support_hub.py --port 8080 --ghost-dir $GHOST_DIR
+PrivateTmp=true
+UMask=0077
 Restart=always
 RestartSec=3
 
@@ -360,10 +479,16 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-# Sanitize ghost-telegram-bot.service if present (add - to EnvironmentFile so missing .env never halts boot)
+# Sanitize & harden ghost-telegram-bot.service if present
 if [ -f "$BOT_SVC_FILE" ]; then
     sudo sed -i 's/^EnvironmentFile=\([^-\/]*\)/EnvironmentFile=-\1/' "$BOT_SVC_FILE" 2>/dev/null || true
     sudo sed -i 's/^EnvironmentFile=\//EnvironmentFile=-\//' "$BOT_SVC_FILE" 2>/dev/null || true
+    if ! grep -q '^PrivateTmp=' "$BOT_SVC_FILE" 2>/dev/null; then
+        sudo sed -i '/^\[Service\]/a PrivateTmp=true' "$BOT_SVC_FILE" 2>/dev/null || true
+    fi
+    if ! grep -q '^UMask=' "$BOT_SVC_FILE" 2>/dev/null; then
+        sudo sed -i '/^\[Service\]/a UMask=0077' "$BOT_SVC_FILE" 2>/dev/null || true
+    fi
 fi
 
 sudo systemctl daemon-reload
@@ -416,7 +541,7 @@ if [ -n "$GHOST_SVC" ] && systemctl is-active --quiet "$GHOST_SVC"; then
 else
     sudo systemctl restart ghost_* 2>/dev/null || sudo systemctl restart ghost 2>/dev/null || true
     if command -v ghost >/dev/null 2>&1; then
-        su - ghost -c "cd $GHOST_DIR && ghost restart" 2>/dev/null || true
+        sudo -u ubuntu bash -c "cd '$GHOST_DIR' && ghost restart" 2>/dev/null || true
     fi
     echo -e "  ✓ Ghost CMS reloaded successfully."
 fi
@@ -430,6 +555,7 @@ echo -e "✓ Support Portal active at:            ${CYAN}https://yourdomain.com/
 echo -e "✓ Team Showcase active at:             ${CYAN}https://yourdomain.com/team/${NC}"
 echo -e "✓ Verification Challenge Engine:       ${GREEN}ACTIVE & VERIFIED (port 8080)${NC}"
 echo -e "✓ Email Templates updated in:          ${CYAN}$GHOST_DIR/current/core/${NC}"
+echo -e "✓ Support Vault permissions:           ${GREEN}LOCKED (0700 / 0600)${NC}"
 echo -e "✓ In-memory template cache:            ${GREEN}CLEARED${NC}"
 echo -e "${GREEN}==================================================================${NC}"
 echo ""

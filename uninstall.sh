@@ -1,9 +1,9 @@
 #!/bin/bash
 # ==============================================================================
-# Ghost Telegram Bot - Uninstaller
+# Ghost Telegram Bot & Support Hub - Uninstaller
 # ==============================================================================
 
-set -e
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -15,14 +15,15 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo -e "${YELLOW}Stopping and disabling ghost-telegram-bot service...${NC}"
-systemctl stop ghost-telegram-bot 2>/dev/null || true
-systemctl disable ghost-telegram-bot 2>/dev/null || true
-
-if [ -f "/etc/systemd/system/ghost-telegram-bot.service" ]; then
-  rm -f "/etc/systemd/system/ghost-telegram-bot.service"
-  systemctl daemon-reload
-fi
+echo -e "${YELLOW}Stopping and disabling ghost-telegram-bot and ghost-support services...${NC}"
+for svc in ghost-telegram-bot ghost-support; do
+  systemctl stop "$svc" 2>/dev/null || true
+  systemctl disable "$svc" 2>/dev/null || true
+  if [ -f "/etc/systemd/system/${svc}.service" ]; then
+    rm -f "/etc/systemd/system/${svc}.service"
+  fi
+done
+systemctl daemon-reload
 
 INSTALL_DIR="/opt/ghost-telegram-bot"
 if [ -d "$INSTALL_DIR" ]; then
@@ -30,5 +31,5 @@ if [ -d "$INSTALL_DIR" ]; then
   rm -rf "$INSTALL_DIR"
 fi
 
-echo -e "${GREEN}✓ Ghost Telegram Bot has been completely uninstalled.${NC}"
-echo -e "*(Note: Your backups in /var/www/ghost/backups have been kept safe)*"
+echo -e "${GREEN}✓ Ghost Telegram Bot & Support Hub services have been cleanly uninstalled.${NC}"
+echo -e "*(Note: Your backups in /var/www/ghost/backups and support vault in /var/www/ghost/support_vault have been kept safe)*"

@@ -10,21 +10,24 @@ Repository: https://github.com/Lordgrim77/Ghost-Restore-
 import os
 import sys
 import shutil
+import socket
+import ipaddress
+import zipfile
 import logging
 import asyncio
 import datetime
 import urllib.request
+import urllib.parse
 import re
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
-# Safe multi-location environment loading
+# Safe multi-location environment loading (excludes untrusted cwd to prevent .env hijacking)
 def load_all_environments() -> List[str]:
-    """Load configuration from all candidate .env files across common installation directories."""
+    """Load configuration from trusted candidate .env files across installation directories."""
     candidates = [
         os.getenv("GHOST_ENV_FILE", ""),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
-        os.path.join(os.getcwd(), ".env"),
         "/var/www/ghost/Ghost-Restore/.env",
         "/opt/ghost-telegram-bot/.env",
         "/var/www/ghost/.env",
@@ -32,7 +35,7 @@ def load_all_environments() -> List[str]:
     seen = set()
     valid_paths = []
     for c in candidates:
-        if c and os.path.isfile(c):
+        if c and not os.path.islink(c) and os.path.isfile(c):
             real = os.path.realpath(c)
             if real not in seen:
                 seen.add(real)
@@ -137,40 +140,73 @@ support_api_server: SupportApiServer = None
 ghost_mgr = GhostManager(ghost_dir=GHOST_DIR, backups_dir=BACKUPS_DIR)
 
 
+def md_escape(val: Any) -> str:
+    """Escape Telegram legacy Markdown v1 metacharacters in dynamic prose strings."""
+    s = str(val if val is not None else "")
+    return (
+        s.replace("\\", "\\\\")
+        .replace("_", "\\_")
+        .replace("*", "\\*")
+        .replace("`", "'")
+        .replace("[", "(")
+    )
+
+
+def md_code(val: Any) -> str:
+    """Sanitize a dynamic value placed inside single-backtick Markdown code spans."""
+    s = str(val if val is not None else "")
+    return s.replace("`", "'").replace("\r", " ").replace("\n", " ")
+
+
 def is_authorized(user_id: int) -> bool:
     """Check if the requesting user ID is authorized (fails closed for security)."""
-    if not ALLOWED_USER_IDS and not ADMIN_CHAT_ID:
+    has_positive_admin = bool(ADMIN_CHAT_ID and ADMIN_CHAT_ID > 0)
+    if not ALLOWED_USER_IDS and not has_positive_admin:
         logger.warning(
-            "Access denied for user %s: ALLOWED_USER_IDS and ADMIN_CHAT_ID are not set in .env. Failing closed for security.",
+            "Access denied for user %s: ALLOWED_USER_IDS and positive ADMIN_CHAT_ID are not set in .env. Failing closed.",
             user_id
         )
         return False
-    if ADMIN_CHAT_ID and user_id == ADMIN_CHAT_ID:
+    if has_positive_admin and user_id == ADMIN_CHAT_ID:
         return True
     return user_id in ALLOWED_USER_IDS
 
 
-def find_backup_file(file_name: str) -> str:
-    """Search for backup file in known locations."""
+def find_backup_file(file_name: str) -> Optional[str]:
+    """Search for a valid .zip backup file in trusted storage locations (excludes /tmp and symlinks)."""
+    if not file_name:
+        return None
     clean_name = os.path.basename(file_name)
     candidates = [
-        file_name,
         os.path.join(BACKUPS_DIR, clean_name),
-        os.path.join("/tmp", clean_name),
         os.path.join("/home/ubuntu", clean_name),
         os.path.join(GHOST_DIR, clean_name),
     ]
+    # Allow explicit path only if it resolves inside trusted directories
+    if os.path.isabs(file_name):
+        candidates.insert(0, file_name)
+
+    trusted_roots = [
+        os.path.realpath(BACKUPS_DIR),
+        os.path.realpath("/home/ubuntu"),
+        os.path.realpath(GHOST_DIR),
+    ]
     for c in candidates:
-        if os.path.exists(c) and os.path.isfile(c):
-            return os.path.abspath(c)
+        if not c or os.path.islink(c) or not str(c).lower().endswith(".zip"):
+            continue
+        if os.path.isfile(c):
+            real = os.path.realpath(c)
+            if any(real == r or real.startswith(r + os.sep) for r in trusted_roots):
+                if zipfile.is_zipfile(real):
+                    return real
     return None
 
 
 def _update_env_file(key_values: dict, env_path: str = None):
-    """Safely updates or appends key-value pairs in .env and memory."""
+    """Safely updates or appends key-value pairs in .env with strict 0600 permissions."""
     if not env_path:
         for f in _loaded_env_files:
-            if os.path.isfile(f):
+            if os.path.isfile(f) and not os.path.islink(f):
                 env_path = f
                 break
         if not env_path:
@@ -181,7 +217,7 @@ def _update_env_file(key_values: dict, env_path: str = None):
         os.environ[str(k)] = str(v)
 
     lines = []
-    if os.path.exists(env_path):
+    if os.path.exists(env_path) and not os.path.islink(env_path):
         with open(env_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
 
@@ -192,7 +228,8 @@ def _update_env_file(key_values: dict, env_path: str = None):
         if stripped and not stripped.startswith("#") and "=" in stripped:
             k = stripped.split("=", 1)[0].strip()
             if k in key_values:
-                new_lines.append(f"{k}={key_values[k]}\n")
+                clean_val = str(key_values[k]).replace("\r", "").replace("\n", "")
+                new_lines.append(f"{k}={clean_val}\n")
                 updated_keys.add(k)
                 continue
         new_lines.append(line)
@@ -201,10 +238,16 @@ def _update_env_file(key_values: dict, env_path: str = None):
         if k not in updated_keys:
             if new_lines and not new_lines[-1].endswith("\n"):
                 new_lines.append("\n")
-            new_lines.append(f"{k}={v}\n")
+            clean_val = str(v).replace("\r", "").replace("\n", "")
+            new_lines.append(f"{k}={clean_val}\n")
 
-    with open(env_path, "w", encoding="utf-8") as f:
+    fd = os.open(env_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
+    try:
+        os.chmod(env_path, 0o600)
+    except Exception:
+        pass
 
 
 def get_main_menu_keyboard():
@@ -261,11 +304,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_text = (
         f"👻 *Ghost Publication Manager*\n\n"
-        f"Welcome, *{user.first_name}*! Use the buttons below to manage, "
+        f"Welcome, *{md_escape(user.first_name)}*! Use the buttons below to manage, "
         f"backup, and restore your Ghost CMS installation.\n\n"
         f"🌐 *Status:* {state_emoji}\n"
-        f"🔗 *URL:* `{status.get('url', 'N/A')}`\n"
-        f"📁 *Ghost Directory:* `{GHOST_DIR}`\n"
+        f"🔗 *URL:* `{md_code(status.get('url', 'N/A'))}`\n"
+        f"📁 *Ghost Directory:* `{md_code(GHOST_DIR)}`\n"
         f"💾 *Total Backups:* `{status.get('total_backups', 0)}`\n"
     )
 
@@ -298,8 +341,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         welcome_text = (
             f"👻 *Ghost Publication Manager*\n\n"
             f"🌐 *Status:* {state_emoji}\n"
-            f"🔗 *URL:* `{status.get('url', 'N/A')}`\n"
-            f"📁 *Ghost Directory:* `{GHOST_DIR}`\n"
+            f"🔗 *URL:* `{md_code(status.get('url', 'N/A'))}`\n"
+            f"📁 *Ghost Directory:* `{md_code(GHOST_DIR)}`\n"
             f"💾 *Total Backups:* `{status.get('total_backups', 0)}`\n"
         )
         await query.edit_message_text(
@@ -328,7 +371,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             async def do_edit():
                 try:
                     await query.edit_message_text(
-                        f"⏳ *Ghost Backup in progress...*\n\n{msg}",
+                        f"⏳ *Ghost Backup in progress...*\n\n{md_escape(msg)}",
                         parse_mode=ParseMode.MARKDOWN
                     )
                 except Exception:
@@ -340,7 +383,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not res.get("success"):
             err_msg = (
                 f"❌ *Backup Failed!*\n\n"
-                f"Error: `{res.get('error', 'Unknown error')}`"
+                f"Error: `{md_code(res.get('error', 'Unknown error'))}`"
             )
             keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
             await query.edit_message_text(
@@ -357,10 +400,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         success_text = (
             f"✅ *Backup Completed Successfully!*\n\n"
-            f"📦 *File:* `{file_name}`\n"
+            f"📦 *File:* `{md_code(file_name)}`\n"
             f"⚖️ *Size:* `{size_mb} MB`\n"
-            f"🕒 *Timestamp:* `{res.get('timestamp')}`\n"
-            f"💾 *Saved at:* `{file_path}`\n\n"
+            f"🕒 *Timestamp:* `{md_code(res.get('timestamp'))}`\n"
+            f"💾 *Saved at:* `{md_code(file_path)}`\n\n"
         )
 
         keyboard = [
@@ -390,7 +433,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             except Exception as e:
                 logger.error(f"Failed to upload document to Telegram: {e}")
-                success_text += f"\n*(Notice: Direct Telegram upload skipped: {e})*"
+                success_text += f"\n*(Notice: Direct Telegram upload skipped: {md_escape(e)})*"
 
         await query.edit_message_text(
             success_text,
@@ -407,13 +450,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             f"📊 *Ghost Publication Status*\n\n"
             f"• *Status:* {state_emoji}\n"
-            f"• *Site URL:* `{status.get('url', 'N/A')}`\n"
-            f"• *Ghost Dir:* `{status.get('ghost_dir')}`\n"
-            f"• *Database Engine:* `{status.get('db_client')}`\n"
-            f"• *Execution User:* `{status.get('ghost_user')}`\n"
-            f"• *Installed Themes:* `{themes_str}`\n"
+            f"• *Site URL:* `{md_code(status.get('url', 'N/A'))}`\n"
+            f"• *Ghost Dir:* `{md_code(status.get('ghost_dir'))}`\n"
+            f"• *Database Engine:* `{md_code(status.get('db_client'))}`\n"
+            f"• *Execution User:* `{md_code(status.get('ghost_user'))}`\n"
+            f"• *Installed Themes:* `{md_code(themes_str)}`\n"
             f"• *Total Backups:* `{status.get('total_backups')}`\n"
-            f"• *Latest Backup:* `{status.get('latest_backup')}`\n"
+            f"• *Latest Backup:* `{md_code(status.get('latest_backup'))}`\n"
         )
 
         keyboard = [
@@ -435,7 +478,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not backups:
             text = (
                 "📁 *No Backups Found*\n\n"
-                f"No backup archives were found in `{BACKUPS_DIR}`, `/tmp`, or `/home/ubuntu`.\n\n"
+                f"No backup archives were found in `{md_code(BACKUPS_DIR)}` or `/home/ubuntu`.\n\n"
                 "💡 *Options:*\n"
                 "• Tap *Create Backup* to create one right now.\n"
                 "• Upload a backup zip directly to this chat.\n"
@@ -483,7 +526,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not real_path:
             await query.edit_message_text(
-                f"❌ File `{file_name}` not found on server in any storage path.",
+                f"❌ File `{md_code(file_name)}` not found on server in any trusted storage path.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="menu_restore_list")]]),
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -492,8 +535,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         size_mb = round(os.path.getsize(real_path) / (1024 * 1024), 2)
         confirm_text = (
             f"⚠️ *Confirm Ghost Publication Restore*\n\n"
-            f"📦 *Archive:* `{os.path.basename(real_path)}`\n"
-            f"📁 *Path:* `{real_path}`\n"
+            f"📦 *Archive:* `{md_code(os.path.basename(real_path))}`\n"
+            f"📁 *Path:* `{md_code(real_path)}`\n"
             f"⚖️ *Size:* `{size_mb} MB`\n\n"
             f"🚨 *Warning:* This operation will:\n"
             f"1. Gracefully stop Ghost\n"
@@ -520,14 +563,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not real_path:
             await query.edit_message_text(
-                f"❌ File `{file_name}` not found on server.",
+                f"❌ File `{md_code(file_name)}` not found on server.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]),
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
         await query.edit_message_text(
-            f"⏳ *Starting Restore for `{os.path.basename(real_path)}`...*\n\n"
+            f"⏳ *Starting Restore for `{md_code(os.path.basename(real_path))}`...*\n\n"
             f"Please wait while Ghost restores your publication...",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -543,7 +586,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             async def do_edit():
                 try:
                     await query.edit_message_text(
-                        f"⏳ *Restoring Ghost publication...*\n\n{msg}",
+                        f"⏳ *Restoring Ghost publication...*\n\n{md_escape(msg)}",
                         parse_mode=ParseMode.MARKDOWN
                     )
                 except Exception:
@@ -555,7 +598,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not res.get("success"):
             err_text = (
                 f"❌ *Restore Failed!*\n\n"
-                f"Error: `{res.get('error', 'Unknown error')}`"
+                f"Error: `{md_code(res.get('error', 'Unknown error'))}`"
             )
             keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
             await query.edit_message_text(
@@ -714,10 +757,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 🎨 Custom themes and route definitions\n"
             "• 🔒 *Strict Privacy:* Incident support vault & evidence files are NEVER synced.\n\n"
             f"• *Status:* {state_tag}\n"
-            f"• *Repository:* `{gh_status.get('repo', 'N/A')}`\n"
-            f"• *Branch:* `{gh_status.get('branch', 'main')}`\n"
-            f"• *Token:* `{gh_status.get('token_status', 'Not Set')}`\n"
-            f"• *Last Commit:* `{gh_status.get('last_commit', 'No sync recorded yet')}`\n"
+            f"• *Repository:* `{md_code(gh_status.get('repo', 'N/A'))}`\n"
+            f"• *Branch:* `{md_code(gh_status.get('branch', 'main'))}`\n"
+            f"• *Token:* `{md_code(gh_status.get('token_status', 'Not Set'))}`\n"
+            f"• *Last Commit:* `{md_code(gh_status.get('last_commit', 'No sync recorded yet'))}`\n"
         )
 
         keyboard = [
@@ -772,7 +815,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             async def do_edit():
                 try:
                     await query.edit_message_text(
-                        f"⏳ *Ghost GitHub Backup in progress...*\n\n{msg}",
+                        f"⏳ *Ghost GitHub Backup in progress...*\n\n{md_escape(msg)}",
                         parse_mode=ParseMode.MARKDOWN
                     )
                 except Exception:
@@ -782,7 +825,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         res = await asyncio.to_thread(ghost_mgr.backup_to_github, progress_callback=progress_cb)
 
         if not res.get("success"):
-            err_text = f"❌ *GitHub Backup Failed!*\n\nError: `{res.get('error', 'Unknown error')}`"
+            err_text = f"❌ *GitHub Backup Failed!*\n\nError: `{md_code(res.get('error', 'Unknown error'))}`"
             keyboard = [[InlineKeyboardButton("⬅️ Back to GitHub Menu", callback_data="menu_github")]]
             await query.edit_message_text(err_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
             return
@@ -802,12 +845,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         success_text = (
             f"✅ *GitHub Backup Completed Successfully!*\n\n"
-            f"🐙 *Repository:* `{res.get('repo')}`\n"
-            f"🌿 *Branch:* `{res.get('branch')}`\n"
-            f"📦 *Commit:* `{res.get('commit')}`\n"
+            f"🐙 *Repository:* `{md_code(res.get('repo'))}`\n"
+            f"🌿 *Branch:* `{md_code(res.get('branch'))}`\n"
+            f"📦 *Commit:* `{md_code(res.get('commit'))}`\n"
             f"📝 *Posts Synced:* `{res.get('posts')}`\n"
             f"📄 *Pages Synced:* `{res.get('pages')}`\n"
-            f"🕒 *Timestamp:* `{res.get('timestamp')}`\n\n"
+            f"🕒 *Timestamp:* `{md_code(res.get('timestamp'))}`\n\n"
             f"🔒 *Privacy Guarantee:* Incident support cases and evidence files were strictly excluded."
         )
         keyboard = [
@@ -829,8 +872,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         confirm_text = (
             f"⚠️ *Confirm Restore from Private GitHub Repository*\n\n"
-            f"🐙 *Repository:* `{gh_status['repo']}`\n"
-            f"🌿 *Branch:* `{gh_status['branch']}`\n\n"
+            f"🐙 *Repository:* `{md_code(gh_status['repo'])}`\n"
+            f"🌿 *Branch:* `{md_code(gh_status['branch'])}`\n\n"
             f"🚨 *Warning:* This operation will:\n"
             f"1. Gracefully stop Ghost\n"
             f"2. Pull the latest unzipped commit from GitHub\n"
@@ -863,7 +906,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             async def do_edit():
                 try:
                     await query.edit_message_text(
-                        f"⏳ *Restoring Ghost from GitHub...*\n\n{msg}",
+                        f"⏳ *Restoring Ghost from GitHub...*\n\n{md_escape(msg)}",
                         parse_mode=ParseMode.MARKDOWN
                     )
                 except Exception:
@@ -873,14 +916,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         res = await asyncio.to_thread(ghost_mgr.restore_from_github, progress_callback=progress_cb)
 
         if not res.get("success"):
-            err_text = f"❌ *GitHub Restore Failed!*\n\nError: `{res.get('error', 'Unknown error')}`"
+            err_text = f"❌ *GitHub Restore Failed!*\n\nError: `{md_code(res.get('error', 'Unknown error'))}`"
             keyboard = [[InlineKeyboardButton("⬅️ Back to GitHub Menu", callback_data="menu_github")]]
             await query.edit_message_text(err_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
             return
 
         success_text = (
             f"🎉 *Ghost Publication Successfully Restored from GitHub!*\n\n"
-            f"✅ Restored from commit `{res.get('commit')}` on branch `{res.get('branch')}`.\n"
+            f"✅ Restored from commit `{md_code(res.get('commit'))}` on branch `{md_code(res.get('branch'))}`.\n"
             f"✅ Database posts, pages, and settings synchronized.\n"
             f"✅ Uploaded media images and themes restored.\n"
             f"✅ Linux permissions secured & Ghost service active."
@@ -971,12 +1014,13 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     size_mb = round(file_size_bytes / (1024 * 1024), 2)
 
     progress_msg = await update.message.reply_text(
-        f"📥 *Receiving backup archive `{file_name}` ({size_mb} MB)...*",
+        f"📥 *Receiving backup archive `{md_code(file_name)}` ({size_mb} MB)...*",
         parse_mode=ParseMode.MARKDOWN
     )
 
     try:
-        clean_name = Path(file_name).name
+        raw_leaf = Path(file_name).name
+        clean_name = re.sub(r"[^\w.\-]", "_", raw_leaf)[:80] or "backup.zip"
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         target_name = f"uploaded_{timestamp}_{clean_name}"
         target_path = os.path.join(BACKUPS_DIR, target_name)
@@ -984,12 +1028,22 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Extended timeouts for large archive transfers
         tg_file = await doc.get_file(read_timeout=600, write_timeout=600, connect_timeout=120)
         await tg_file.download_to_drive(custom_path=target_path, read_timeout=600, write_timeout=600)
+        try:
+            os.chmod(target_path, 0o600)
+        except Exception:
+            pass
+        if not zipfile.is_zipfile(target_path):
+            try:
+                os.unlink(target_path)
+            except Exception:
+                pass
+            raise ValueError("Uploaded file is not a valid ZIP archive.")
 
         text = (
             f"📥 *Backup File Uploaded Successfully!*\n\n"
-            f"📦 *Name:* `{clean_name}`\n"
+            f"📦 *Name:* `{md_code(clean_name)}`\n"
             f"⚖️ *Size:* `{size_mb} MB`\n"
-            f"💾 *Saved as:* `{target_name}`\n\n"
+            f"💾 *Saved as:* `{md_code(target_name)}`\n\n"
             f"Would you like to restore your Ghost blog using this archive right now?"
         )
 
@@ -1007,6 +1061,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error handling document upload: {e}")
         err_msg = str(e).lower()
+        safe_fn = md_code(Path(file_name).name)
         if "file is too big" in err_msg or "fileisttoobig" in str(type(e)).lower():
             limit_msg = (
                 f"⚠️ *File Exceeds Telegram Cloud Bot Limit ({size_mb} MB)*\n\n"
@@ -1015,12 +1070,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"1️⃣ **Direct URL Download**:\n"
                 f"Send: `/url <direct_download_link>` (fetches archives of any size directly onto the server)\n\n"
                 f"2️⃣ **Server Upload**:\n"
-                f"Upload via SSH/SCP to `/home/ubuntu/{file_name}` and send: `/restore /home/ubuntu/{file_name}`"
+                f"Upload via SSH/SCP to `/home/ubuntu/{safe_fn}` and send: `/restore /home/ubuntu/{safe_fn}`"
             )
             await progress_msg.edit_text(limit_msg, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
         else:
             await progress_msg.edit_text(
-                f"❌ *Failed to download backup file:*\n`{e}`",
+                f"❌ *Failed to download backup file:*\n`{md_code(e)}`",
                 parse_mode=ParseMode.MARKDOWN
             )
 
@@ -1079,14 +1134,62 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await support_api_server.bridge.cancel_command(update, context)
 
 
+def _is_forbidden_ip(ip_str: str) -> bool:
+    """Return True if IP is loopback, private, link-local, metadata, multicast, or reserved."""
+    clean_ip = ip_str.split("%")[0]
+    ip_obj = ipaddress.ip_address(clean_ip)
+    if getattr(ip_obj, "ipv4_mapped", None):
+        ip_obj = ip_obj.ipv4_mapped
+    return (
+        ip_obj.is_private
+        or ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_multicast
+        or ip_obj.is_reserved
+        or ip_obj.is_unspecified
+    )
+
+
+def _validate_public_http_url(target_url: str) -> str:
+    """Validate URL scheme/host and reject internal, loopback, or cloud metadata IPs (SSRF defense)."""
+    parsed = urllib.parse.urlparse(target_url)
+    if parsed.scheme not in ("https", "http"):
+        raise ValueError("Only http:// and https:// download URLs are permitted.")
+    if parsed.username or parsed.password:
+        raise ValueError("URLs containing embedded credentials are not permitted.")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Invalid URL hostname.")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        addr_infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except Exception as e:
+        raise ValueError(f"DNS resolution failed for {host}: {e}")
+    if not addr_infos:
+        raise ValueError(f"Could not resolve hostname: {host}")
+    for info in addr_infos:
+        sockaddr = info[4]
+        if sockaddr and _is_forbidden_ip(sockaddr[0]):
+            raise ValueError(f"Blocked connection to non-public IP address ({sockaddr[0]}).")
+    return target_url
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validates every redirect destination against SSRF blocklists before following."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        resolved_url = urllib.parse.urljoin(req.full_url, newurl)
+        _validate_public_http_url(resolved_url)
+        return super().redirect_request(req, fp, code, msg, headers, resolved_url)
+
+
 async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Download backup archive directly from a given URL."""
+    """Download backup archive directly from a validated public URL."""
     user = update.effective_user
     if not is_authorized(user.id):
         await send_unauthorized(update)
         return
 
-    if not context.args or not context.args[0].startswith("http"):
+    if not context.args or not context.args[0].startswith(("https://", "http://")):
         await update.message.reply_text(
             "ℹ️ *Usage:*\n`/url <download_link>`\n\n"
             "Example: `/url https://file.io/xxxxxx` or a Dropbox/Google Drive share link.",
@@ -1101,37 +1204,55 @@ async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Normalize Google Drive sharing links to direct download
     if "drive.google.com" in raw_url:
-        import re
         gdrive_match = re.search(r"/d/([a-zA-Z0-9_-]+)", raw_url) or re.search(r"id=([a-zA-Z0-9_-]+)", raw_url)
         if gdrive_match:
             raw_url = f"https://drive.google.com/uc?export=download&id={gdrive_match.group(1)}&confirm=t"
 
     status_msg = await update.message.reply_text(
-        "⏳ *Downloading backup archive from URL directly to server...*",
+        "⏳ *Validating URL & downloading backup archive directly to server...*",
         parse_mode=ParseMode.MARKDOWN
     )
 
+    target_path = None
     try:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         target_name = f"url_backup_{timestamp}.zip"
         target_path = os.path.join(BACKUPS_DIR, target_name)
+        max_download_bytes = 2 * 1024 * 1024 * 1024  # 2 GB cap
 
         def do_download():
+            _validate_public_http_url(raw_url)
+            opener = urllib.request.build_opener(_SafeRedirectHandler())
             req = urllib.request.Request(
                 raw_url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                headers={"User-Agent": "GhostRestoreBot/1.0"}
             )
-            with urllib.request.urlopen(req, timeout=600) as resp, open(target_path, "wb") as out:
-                shutil.copyfileobj(resp, out)
+            fd = os.open(target_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            downloaded = 0
+            with opener.open(req, timeout=600) as resp, os.fdopen(fd, "wb") as out:
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    downloaded += len(chunk)
+                    if downloaded > max_download_bytes:
+                        raise ValueError("Download exceeds maximum allowed archive size (2 GB).")
+                    out.write(chunk)
+            try:
+                os.chmod(target_path, 0o600)
+            except Exception:
+                pass
+            if not zipfile.is_zipfile(target_path):
+                raise ValueError("Downloaded resource is not a valid ZIP archive.")
 
         await asyncio.to_thread(do_download)
 
         size_mb = round(os.path.getsize(target_path) / (1024 * 1024), 2)
         text = (
             f"📥 *Backup Downloaded Successfully!*\n\n"
-            f"📦 *Name:* `{target_name}`\n"
+            f"📦 *Name:* `{md_code(target_name)}`\n"
             f"⚖️ *Size:* `{size_mb} MB`\n"
-            f"💾 *Saved to:* `{target_path}`\n\n"
+            f"💾 *Saved to:* `{md_code(target_path)}`\n\n"
             f"Would you like to restore your Ghost publication with this archive right now?"
         )
         keyboard = [
@@ -1141,8 +1262,13 @@ async def url_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
+        if target_path and os.path.exists(target_path):
+            try:
+                os.unlink(target_path)
+            except Exception:
+                pass
         logger.error(f"Download failed: {e}")
-        await status_msg.edit_text(f"❌ *Download Failed:*\n`{e}`", parse_mode=ParseMode.MARKDOWN)
+        await status_msg.edit_text(f"❌ *Download Failed:*\n`{md_code(e)}`", parse_mode=ParseMode.MARKDOWN)
 
 
 async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1172,15 +1298,15 @@ async def restore_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     real_path = find_backup_file(target)
 
     if not real_path:
-        await update.message.reply_text(f"❌ File not found on server:\n`{target}`", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"❌ Valid `.zip` backup file not found in trusted storage:\n`{md_code(target)}`", parse_mode=ParseMode.MARKDOWN)
         return
 
     size_mb = round(os.path.getsize(real_path) / (1024 * 1024), 2)
     name = os.path.basename(real_path)
     text = (
         f"⚠️ *Confirm Restore from Server File*\n\n"
-        f"📦 *Name:* `{name}`\n"
-        f"📁 *Path:* `{real_path}`\n"
+        f"📦 *Name:* `{md_code(name)}`\n"
+        f"📁 *Path:* `{md_code(real_path)}`\n"
         f"⚖️ *Size:* `{size_mb} MB`\n\n"
         f"Are you sure you want to restore Ghost using this archive?"
     )
@@ -1220,18 +1346,29 @@ async def github_setup_command(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         pass
 
+    try:
+        branch = GhostManager._validate_git_branch(branch)
+    except ValueError as ve:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"❌ *Invalid Branch Name:* `{md_code(ve)}`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
     status_msg = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text="⏳ *Testing GitHub connection & validating permissions...*",
         parse_mode=ParseMode.MARKDOWN
     )
 
-    valid, err_or_ok = await asyncio.to_thread(ghost_mgr.test_github_connection, repo_url, token)
+    clean_repo = ghost_mgr._build_authenticated_git_url(repo_url)
+    valid, err_or_ok = await asyncio.to_thread(ghost_mgr.test_github_connection, clean_repo, token)
     if not valid:
         keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
         await status_msg.edit_text(
             f"❌ *GitHub Connection Failed!*\n\n"
-            f"Error: `{err_or_ok}`\n\n"
+            f"Error: `{md_code(err_or_ok)}`\n\n"
             f"Please verify that the repository URL exists and your token has `repo` permissions.",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN
@@ -1239,15 +1376,14 @@ async def github_setup_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     _update_env_file({
-        "GITHUB_BACKUP_REPO": repo_url,
+        "GITHUB_BACKUP_REPO": clean_repo,
         "GITHUB_TOKEN": token,
         "GITHUB_BRANCH": branch
     })
-    os.environ["GITHUB_BACKUP_REPO"] = repo_url
+    os.environ["GITHUB_BACKUP_REPO"] = clean_repo
     os.environ["GITHUB_TOKEN"] = token
     os.environ["GITHUB_BRANCH"] = branch
 
-    clean_repo = re.sub(r"https?://[^@]+@", "https://", repo_url)
     masked_token = f"{token[:4]}...{token[-4:]}" if len(token) > 8 else "Configured"
 
     keyboard = [
@@ -1256,9 +1392,9 @@ async def github_setup_command(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     await status_msg.edit_text(
         f"✅ *GitHub Backup Configured Successfully!*\n\n"
-        f"🐙 *Repository:* `{clean_repo}`\n"
-        f"🌿 *Branch:* `{branch}`\n"
-        f"🔑 *Token:* `{masked_token}` (Validated)\n\n"
+        f"🐙 *Repository:* `{md_code(clean_repo)}`\n"
+        f"🌿 *Branch:* `{md_code(branch)}`\n"
+        f"🔑 *Token:* `{md_code(masked_token)}` (Validated)\n\n"
         f"🔒 _(Your message containing the secret token was automatically deleted from chat for security)_",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
@@ -1298,7 +1434,7 @@ async def github_backup_command(update: Update, context: ContextTypes.DEFAULT_TY
         async def do_edit():
             try:
                 await status_msg.edit_text(
-                    f"⏳ *Ghost GitHub Backup in progress...*\n\n{msg}",
+                    f"⏳ *Ghost GitHub Backup in progress...*\n\n{md_escape(msg)}",
                     parse_mode=ParseMode.MARKDOWN
                 )
             except Exception:
@@ -1309,7 +1445,7 @@ async def github_backup_command(update: Update, context: ContextTypes.DEFAULT_TY
     if not res.get("success"):
         keyboard = [[InlineKeyboardButton("🐙 GitHub Menu", callback_data="menu_github")]]
         await status_msg.edit_text(
-            f"❌ *GitHub Backup Failed!*\n\nError: `{res.get('error', 'Unknown error')}`",
+            f"❌ *GitHub Backup Failed!*\n\nError: `{md_code(res.get('error', 'Unknown error'))}`",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode=ParseMode.MARKDOWN
         )
@@ -1326,12 +1462,12 @@ async def github_backup_command(update: Update, context: ContextTypes.DEFAULT_TY
 
     success_text = (
         f"✅ *GitHub Backup Completed Successfully!*\n\n"
-        f"🐙 *Repository:* `{res.get('repo')}`\n"
-        f"🌿 *Branch:* `{res.get('branch')}`\n"
-        f"📦 *Commit:* `{res.get('commit')}`\n"
+        f"🐙 *Repository:* `{md_code(res.get('repo'))}`\n"
+        f"🌿 *Branch:* `{md_code(res.get('branch'))}`\n"
+        f"📦 *Commit:* `{md_code(res.get('commit'))}`\n"
         f"📝 *Posts Synced:* `{res.get('posts')}`\n"
         f"📄 *Pages Synced:* `{res.get('pages')}`\n"
-        f"🕒 *Timestamp:* `{res.get('timestamp')}`\n\n"
+        f"🕒 *Timestamp:* `{md_code(res.get('timestamp'))}`\n\n"
         f"🔒 *Privacy Note:* Evidence files and support cases were strictly excluded."
     )
     keyboard = [
@@ -1360,8 +1496,8 @@ async def github_restore_command(update: Update, context: ContextTypes.DEFAULT_T
 
     confirm_text = (
         f"⚠️ *Confirm Restore from Private GitHub Repository*\n\n"
-        f"🐙 *Repository:* `{status['repo']}`\n"
-        f"🌿 *Branch:* `{status['branch']}`\n\n"
+        f"🐙 *Repository:* `{md_code(status['repo'])}`\n"
+        f"🌿 *Branch:* `{md_code(status['branch'])}`\n\n"
         f"🚨 *Warning:* This operation will:\n"
         f"1. Gracefully stop Ghost\n"
         f"2. Pull the latest unzipped commit from GitHub\n"
@@ -1390,10 +1526,10 @@ async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TY
     text = (
         f"🐙 *GitHub Sync Status*\n\n"
         f"• *Status:* {state_tag}\n"
-        f"• *Repository:* `{gh_status['repo']}`\n"
-        f"• *Branch:* `{gh_status['branch']}`\n"
-        f"• *Token:* `{gh_status['token_status']}`\n"
-        f"• *Last Commit:* `{gh_status['last_commit']}`\n"
+        f"• *Repository:* `{md_code(gh_status['repo'])}`\n"
+        f"• *Branch:* `{md_code(gh_status['branch'])}`\n"
+        f"• *Token:* `{md_code(gh_status['token_status'])}`\n"
+        f"• *Last Commit:* `{md_code(gh_status['last_commit'])}`\n"
     )
     keyboard = [
         [
@@ -1404,6 +1540,12 @@ async def github_status_command(update: Update, context: ContextTypes.DEFAULT_TY
     ]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
+
+def _effective_allowed_user_ids() -> set:
+    allowed = set(ALLOWED_USER_IDS)
+    if ADMIN_CHAT_ID and ADMIN_CHAT_ID > 0:
+        allowed.add(ADMIN_CHAT_ID)
+    return allowed
 
 
 async def post_init(application: Application):
@@ -1416,6 +1558,8 @@ async def post_init(application: Application):
             admin_chat_id=ADMIN_CHAT_ID,
             port=SUPPORT_PORT,
             host=SUPPORT_HOST,
+            allowed_user_ids=_effective_allowed_user_ids(),
+            auth_callback=is_authorized,
         )
         await support_api_server.start()
         logger.info(f"Support REST API daemon listening on http://{SUPPORT_HOST}:{SUPPORT_PORT}")
@@ -1461,7 +1605,9 @@ def main():
             ghost_dir=GHOST_DIR,
             admin_chat_id=ADMIN_CHAT_ID,
             port=SUPPORT_PORT,
-            host=SUPPORT_HOST
+            host=SUPPORT_HOST,
+            allowed_user_ids=_effective_allowed_user_ids(),
+            auth_callback=is_authorized,
         )
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -1479,7 +1625,7 @@ def main():
     print("==================================================")
     print(f"Ghost Directory:     {GHOST_DIR}")
     print(f"Backups Directory:   {BACKUPS_DIR}")
-    print(f"Authorized User IDs: {ALLOWED_USER_IDS or 'All Users (Open)'}")
+    print(f"Authorized User IDs: {_effective_allowed_user_ids() or 'None Configured (Locked / Fail-Closed)'}")
     print(f"Admin Alert Chat ID: {ADMIN_CHAT_ID or 'Not Set'}")
     print(f"Support REST API:    http://{SUPPORT_HOST}:{SUPPORT_PORT}")
     if _loaded_env_files:
@@ -1534,7 +1680,9 @@ def main():
             ghost_dir=GHOST_DIR,
             admin_chat_id=ADMIN_CHAT_ID,
             port=SUPPORT_PORT,
-            host=SUPPORT_HOST
+            host=SUPPORT_HOST,
+            allowed_user_ids=_effective_allowed_user_ids(),
+            auth_callback=is_authorized,
         )
         try:
             loop.run_until_complete(fallback_server.start())
