@@ -257,7 +257,7 @@ fi
 # 4b. Ghost Admin Sign-in Dark/Light Mode Theme Toggle & FOUC Synchronizer
 echo -e "${BLUE}[4b/8] Installing Ghost Admin Dark/Light Theme Toggle...${NC}"
 sudo python3 - "$GHOST_DIR" <<'PYEOF'
-import os, sys, glob
+import os, sys, glob, re
 
 ghost_dir = sys.argv[1]
 head_patch = """    <!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme Toggle -->
@@ -287,6 +287,67 @@ head_patch = """    <!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme
       }
       #gh-admin-theme-toggle:hover {
         transform: translateY(-1px);
+      }
+
+      /* Ghost Admin Sign-in Button Contrast Fix (Ensures 'Sign in' word is never white on white in light mode) */
+      html:not(.dark) .react-admin form button[type="submit"],
+      html:not(.dark) form button[type="submit"],
+      html:not(.dark) button.bg-ghostaccent {
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+        background-color: #ffffff !important;
+        border: 1px solid rgba(0, 0, 0, 0.16) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+        font-weight: 600 !important;
+      }
+
+      html:not(.dark) .react-admin form button[type="submit"]:hover,
+      html:not(.dark) form button[type="submit"]:hover,
+      html:not(.dark) button.bg-ghostaccent:hover {
+        background-color: #f1f5f9 !important;
+        border-color: rgba(0, 0, 0, 0.28) !important;
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+      }
+
+      html:not(.dark) .react-admin form button[type="submit"]:disabled,
+      html:not(.dark) form button[type="submit"]:disabled,
+      html:not(.dark) button.bg-ghostaccent:disabled {
+        opacity: 0.65 !important;
+        cursor: not-allowed !important;
+      }
+
+      html:not(.dark) .react-admin form button[type="submit"] svg,
+      html:not(.dark) form button[type="submit"] svg,
+      html:not(.dark) button.bg-ghostaccent svg {
+        color: #000000 !important;
+        stroke: #000000 !important;
+      }
+
+      html.dark .react-admin form button[type="submit"],
+      html.dark form button[type="submit"],
+      html.dark button.bg-ghostaccent {
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+        background-color: #ffffff !important;
+        border: 1px solid #ffffff !important;
+        box-shadow: 0 4px 14px rgba(255, 255, 255, 0.15) !important;
+        font-weight: 600 !important;
+      }
+
+      html.dark .react-admin form button[type="submit"]:hover,
+      html.dark form button[type="submit"]:hover,
+      html.dark button.bg-ghostaccent:hover {
+        background-color: #f1f5f9 !important;
+        color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
+      }
+
+      html.dark .react-admin form button[type="submit"] svg,
+      html.dark form button[type="submit"] svg,
+      html.dark button.bg-ghostaccent svg {
+        color: #000000 !important;
+        stroke: #000000 !important;
       }
     </style>
     <script id="gh-admin-theme-bootstrap">
@@ -403,10 +464,31 @@ for cand in admin_candidates:
             content = f.read()
         
         modified = False
-        if "gh-admin-theme-styles" not in content and "</head>" in content:
+        if "id=\"gh-admin-theme-styles\"" in content:
+            new_content = re.sub(
+                r'<!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme Toggle -->.*?</script>\s*',
+                head_patch,
+                content,
+                flags=re.DOTALL
+            )
+            if new_content != content:
+                content = new_content
+                modified = True
+        elif "</head>" in content:
             content = content.replace("</head>", head_patch + "  </head>", 1)
             modified = True
-        if "gh-admin-theme-toggle-runtime" not in content and "</body>" in content:
+
+        if "id=\"gh-admin-theme-toggle-runtime\"" in content:
+            new_content = re.sub(
+                r'<script id="gh-admin-theme-toggle-runtime">.*?</script>\s*',
+                runtime_patch,
+                content,
+                flags=re.DOTALL
+            )
+            if new_content != content:
+                content = new_content
+                modified = True
+        elif "</body>" in content:
             content = content.replace("</body>", runtime_patch + "  </body>", 1)
             modified = True
             
