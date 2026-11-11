@@ -76,7 +76,7 @@
       min-height: auto !important;
       position: relative !important;
       box-sizing: border-box !important;
-      padding: 38px 34px !important;
+      padding: 44px 34px 34px !important;
       border-radius: 24px !important;
       background: linear-gradient(180deg, rgba(22, 27, 38, 0.88) 0%, rgba(12, 16, 24, 0.94) 100%) !important;
       backdrop-filter: blur(40px) saturate(200%) !important;
@@ -96,7 +96,7 @@
     .gh-portal-popup-container:has(.gh-portal-account-header),
     .gh-portal-popup-container:has(.gh-portal-list-toggle-wrapper) {
       max-width: 520px !important;
-      padding: 38px 34px !important;
+      padding: 44px 34px 34px !important;
     }
 
     /* Refined Input Fields for Dark Mode */
@@ -140,26 +140,44 @@
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      z-index: 50 !important;
+      z-index: 60 !important;
       border-radius: 50% !important;
       background: rgba(255, 255, 255, 0.08) !important;
       border: 1px solid rgba(255, 255, 255, 0.16) !important;
-      transition: all 0.2s ease !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+      box-sizing: border-box !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      outline: none !important;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
     }
 
     .gh-portal-closeicon-container:hover {
       background: rgba(255, 255, 255, 0.18) !important;
-      border-color: rgba(255, 255, 255, 0.3) !important;
-      transform: scale(1.05) !important;
+      border-color: rgba(255, 255, 255, 0.32) !important;
+      transform: scale(1.06) !important;
+    }
+
+    .gh-portal-closeicon-container:active {
+      transform: scale(0.96) !important;
     }
 
     .gh-portal-closeicon {
       color: #cbd5e1 !important;
+      width: 14px !important;
+      height: 14px !important;
+      display: block !important;
       transition: color 0.2s ease !important;
     }
 
+    .gh-portal-closeicon-container:hover .gh-portal-closeicon,
     .gh-portal-closeicon:hover {
       color: #ffffff !important;
+    }
+
+    html[dir="rtl"] .gh-portal-closeicon-container {
+      right: unset !important;
+      left: 18px !important;
     }
 
 
@@ -174,7 +192,7 @@
     }
 
     /* ========================================================================
-       TYPOGRAPHY & HEADERS
+       TYPOGRAPHY & HEADERS (SAFE FROM CLOSE/BACK BUTTON OVERLAP)
        ======================================================================== */
     .gh-portal-main-title,
     .gh-portal-detail-header h3,
@@ -187,6 +205,13 @@
       text-align: center !important;
     }
 
+    /* Inset centered main titles so they never collide with absolute corner buttons */
+    .gh-portal-main-title {
+      padding-left: 28px !important;
+      padding-right: 28px !important;
+      box-sizing: border-box !important;
+    }
+
     .gh-portal-email-preferences-header,
     .gh-portal-detail-header {
       display: flex !important;
@@ -196,6 +221,27 @@
       width: 100% !important;
       margin-bottom: 24px !important;
       min-height: 36px !important;
+      padding-left: 44px !important;
+      padding-right: 44px !important;
+      box-sizing: border-box !important;
+    }
+
+    .gh-portal-signin-header,
+    .gh-portal-signup-header,
+    .gh-portal-account-header {
+      padding-left: 44px !important;
+      padding-right: 44px !important;
+      box-sizing: border-box !important;
+      position: relative !important;
+    }
+
+    html[dir="rtl"] .gh-portal-detail-header,
+    html[dir="rtl"] .gh-portal-email-preferences-header,
+    html[dir="rtl"] .gh-portal-signin-header,
+    html[dir="rtl"] .gh-portal-signup-header,
+    html[dir="rtl"] .gh-portal-account-header {
+      padding-left: 44px !important;
+      padding-right: 44px !important;
     }
 
     .gh-portal-detail-header .gh-portal-btn-back {
@@ -223,35 +269,9 @@
       border-color: rgba(255, 255, 255, 0.4) !important;
     }
 
-    .gh-portal-closeicon-container {
-      cursor: pointer !important;
-      top: 18px !important;
-      right: 18px !important;
-      position: absolute !important;
-      width: 34px !important;
-      height: 34px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      z-index: 50 !important;
-      border-radius: 50% !important;
-      background: rgba(255, 255, 255, 0.05) !important;
-      border: 1px solid rgba(255, 255, 255, 0.1) !important;
-      transition: all 0.2s ease !important;
-    }
-
-    .gh-portal-closeicon-container:hover {
-      background: rgba(255, 255, 255, 0.12) !important;
-      border-color: rgba(255, 255, 255, 0.2) !important;
-    }
-
-    .gh-portal-closeicon {
-      color: #94a3b8 !important;
-      transition: color 0.2s ease !important;
-    }
-
-    .gh-portal-closeicon:hover {
-      color: #ffffff !important;
+    html[dir="rtl"] .gh-portal-detail-header .gh-portal-btn-back {
+      left: unset !important;
+      right: 0 !important;
     }
 
     /* ========================================================================
@@ -904,11 +924,37 @@
       }
 
       .gh-portal-popup-container {
-        padding: 24px 16px !important;
+        padding: 42px 18px 24px 18px !important;
         border-radius: 20px !important;
         max-width: 100% !important;
         width: 100% !important;
         margin: 8px auto 24px auto !important;
+      }
+
+      .gh-portal-closeicon-container {
+        top: 12px !important;
+        right: 12px !important;
+        width: 32px !important;
+        height: 32px !important;
+      }
+
+      html[dir="rtl"] .gh-portal-closeicon-container {
+        right: unset !important;
+        left: 12px !important;
+      }
+
+      .gh-portal-main-title {
+        padding-left: 20px !important;
+        padding-right: 20px !important;
+      }
+
+      .gh-portal-detail-header,
+      .gh-portal-email-preferences-header,
+      .gh-portal-signin-header,
+      .gh-portal-signup-header,
+      .gh-portal-account-header {
+        padding-left: 36px !important;
+        padding-right: 36px !important;
       }
 
       .gh-portal-list-toggle-wrapper,
@@ -1040,7 +1086,7 @@
     .gh-portal-popup-container:has(.gh-portal-share-preview) {
       max-width: 560px !important;
       width: 100% !important;
-      padding: 34px 30px !important;
+      padding: 40px 30px 30px !important;
       border-radius: 24px !important;
       background: linear-gradient(180deg, rgba(22, 27, 38, 0.94) 0%, rgba(12, 16, 24, 0.97) 100%) !important;
       backdrop-filter: blur(40px) saturate(200%) !important;
@@ -1051,6 +1097,13 @@
 
     .gh-portal-share-header {
       margin-bottom: 22px !important;
+      padding-right: 48px !important;
+      box-sizing: border-box !important;
+      position: relative !important;
+    }
+    html[dir="rtl"] .gh-portal-share-header {
+      padding-right: 0 !important;
+      padding-left: 48px !important;
     }
     .gh-portal-share-header .gh-portal-main-title {
       color: #ffffff !important;
@@ -1059,6 +1112,8 @@
       font-weight: 700 !important;
       letter-spacing: -0.02em !important;
       text-align: left !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
     }
 
     .gh-portal-share-preview {
@@ -1202,9 +1257,16 @@
     @media (max-width: 580px) {
       .gh-portal-popup-container.share,
       .gh-portal-popup-container:has(.gh-portal-share) {
-        padding: 24px 18px !important;
+        padding: 38px 16px 20px 16px !important;
         margin: 16px auto !important;
         width: calc(100% - 24px) !important;
+      }
+      .gh-portal-share-header {
+        padding-right: 38px !important;
+      }
+      html[dir="rtl"] .gh-portal-share-header {
+        padding-right: 0 !important;
+        padding-left: 38px !important;
       }
       .gh-portal-share-actions {
         flex-wrap: wrap !important;
@@ -1283,7 +1345,7 @@
       max-width: 480px !important;
       position: relative !important;
       box-sizing: border-box !important;
-      padding: 38px 34px !important;
+      padding: 44px 34px 34px !important;
       border-radius: 24px !important;
       background: rgba(255, 255, 255, 0.94) !important;
       backdrop-filter: blur(36px) saturate(190%) !important;
@@ -1302,7 +1364,7 @@
     .gh-portal-popup-container:has(.gh-portal-account-header),
     .gh-portal-popup-container:has(.gh-portal-list-toggle-wrapper) {
       max-width: 520px !important;
-      padding: 38px 34px !important;
+      padding: 44px 34px 34px !important;
     }
 
     .gh-portal-closeicon-container {
@@ -1315,26 +1377,44 @@
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      z-index: 50 !important;
+      z-index: 60 !important;
       border-radius: 50% !important;
       background: rgba(0, 0, 0, 0.05) !important;
-      border: 1px solid rgba(0, 0, 0, 0.1) !important;
-      transition: all 0.2s ease !important;
+      border: 1px solid rgba(0, 0, 0, 0.12) !important;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+      box-sizing: border-box !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      outline: none !important;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
     }
 
     .gh-portal-closeicon-container:hover {
       background: rgba(0, 0, 0, 0.1) !important;
-      border-color: rgba(0, 0, 0, 0.2) !important;
-      transform: scale(1.05) !important;
+      border-color: rgba(0, 0, 0, 0.22) !important;
+      transform: scale(1.06) !important;
+    }
+
+    .gh-portal-closeicon-container:active {
+      transform: scale(0.96) !important;
     }
 
     .gh-portal-closeicon {
       color: #475569 !important;
+      width: 14px !important;
+      height: 14px !important;
+      display: block !important;
       transition: color 0.2s ease !important;
     }
 
+    .gh-portal-closeicon-container:hover .gh-portal-closeicon,
     .gh-portal-closeicon:hover {
       color: #0f172a !important;
+    }
+
+    html[dir="rtl"] .gh-portal-closeicon-container {
+      right: unset !important;
+      left: 18px !important;
     }
 
     .gh-portal-input {
@@ -1379,6 +1459,13 @@
       text-align: center !important;
     }
 
+    /* Inset centered main titles so they never collide with absolute corner buttons */
+    .gh-portal-main-title {
+      padding-left: 28px !important;
+      padding-right: 28px !important;
+      box-sizing: border-box !important;
+    }
+
     .gh-portal-email-preferences-header,
     .gh-portal-detail-header {
       display: flex !important;
@@ -1388,6 +1475,27 @@
       width: 100% !important;
       margin-bottom: 24px !important;
       min-height: 36px !important;
+      padding-left: 44px !important;
+      padding-right: 44px !important;
+      box-sizing: border-box !important;
+    }
+
+    .gh-portal-signin-header,
+    .gh-portal-signup-header,
+    .gh-portal-account-header {
+      padding-left: 44px !important;
+      padding-right: 44px !important;
+      box-sizing: border-box !important;
+      position: relative !important;
+    }
+
+    html[dir="rtl"] .gh-portal-detail-header,
+    html[dir="rtl"] .gh-portal-email-preferences-header,
+    html[dir="rtl"] .gh-portal-signin-header,
+    html[dir="rtl"] .gh-portal-signup-header,
+    html[dir="rtl"] .gh-portal-account-header {
+      padding-left: 44px !important;
+      padding-right: 44px !important;
     }
 
     .gh-portal-detail-header .gh-portal-btn-back {
@@ -1407,6 +1515,17 @@
       padding: 0 !important;
       color: #64748b !important;
       transition: all 0.2s ease !important;
+    }
+
+    .gh-portal-detail-header .gh-portal-btn-back:hover {
+      background: rgba(0, 0, 0, 0.1) !important;
+      color: #0f172a !important;
+      border-color: rgba(0, 0, 0, 0.25) !important;
+    }
+
+    html[dir="rtl"] .gh-portal-detail-header .gh-portal-btn-back {
+      left: unset !important;
+      right: 0 !important;
     }
 
     .gh-portal-detail-header .gh-portal-btn-back:hover {
@@ -1865,10 +1984,37 @@
         padding: 16px 12px 36px 12px !important;
       }
       .gh-portal-popup-container {
-        padding: 24px 16px !important;
+        padding: 42px 18px 24px 18px !important;
         border-radius: 20px !important;
         max-width: 100% !important;
         width: 100% !important;
+        margin: 8px auto 24px auto !important;
+      }
+
+      .gh-portal-closeicon-container {
+        top: 12px !important;
+        right: 12px !important;
+        width: 32px !important;
+        height: 32px !important;
+      }
+
+      html[dir="rtl"] .gh-portal-closeicon-container {
+        right: unset !important;
+        left: 12px !important;
+      }
+
+      .gh-portal-main-title {
+        padding-left: 20px !important;
+        padding-right: 20px !important;
+      }
+
+      .gh-portal-detail-header,
+      .gh-portal-email-preferences-header,
+      .gh-portal-signin-header,
+      .gh-portal-signup-header,
+      .gh-portal-account-header {
+        padding-left: 36px !important;
+        padding-right: 36px !important;
       }
       footer.gh-portal-account-footer {
         flex-direction: column !important;
@@ -1964,7 +2110,7 @@
     .gh-portal-popup-container:has(.gh-portal-share-preview) {
       max-width: 560px !important;
       width: 100% !important;
-      padding: 34px 30px !important;
+      padding: 40px 30px 30px !important;
       border-radius: 24px !important;
       background: rgba(255, 255, 255, 0.96) !important;
       backdrop-filter: blur(36px) saturate(190%) !important;
@@ -1975,6 +2121,13 @@
 
     .gh-portal-share-header {
       margin-bottom: 22px !important;
+      padding-right: 48px !important;
+      box-sizing: border-box !important;
+      position: relative !important;
+    }
+    html[dir="rtl"] .gh-portal-share-header {
+      padding-right: 0 !important;
+      padding-left: 48px !important;
     }
     .gh-portal-share-header .gh-portal-main-title {
       color: #0f172a !important;
@@ -1983,6 +2136,8 @@
       font-weight: 700 !important;
       letter-spacing: -0.02em !important;
       text-align: left !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
     }
 
     .gh-portal-share-preview {
@@ -2126,9 +2281,16 @@
     @media (max-width: 580px) {
       .gh-portal-popup-container.share,
       .gh-portal-popup-container:has(.gh-portal-share) {
-        padding: 24px 18px !important;
+        padding: 38px 16px 20px 16px !important;
         margin: 16px auto !important;
         width: calc(100% - 24px) !important;
+      }
+      .gh-portal-share-header {
+        padding-right: 38px !important;
+      }
+      html[dir="rtl"] .gh-portal-share-header {
+        padding-right: 0 !important;
+        padding-left: 38px !important;
       }
       .gh-portal-share-actions {
         flex-wrap: wrap !important;
