@@ -254,6 +254,176 @@ PYEOF
     sudo chown -R ghost:ghost "$GHOST_DIR/current/core/" 2>/dev/null || true
 fi
 
+# 4b. Ghost Admin Sign-in Dark/Light Mode Theme Toggle & FOUC Synchronizer
+echo -e "${BLUE}[4b/8] Installing Ghost Admin Dark/Light Theme Toggle...${NC}"
+sudo python3 - "$GHOST_DIR" <<'PYEOF'
+import os, sys, glob
+
+ghost_dir = sys.argv[1]
+head_patch = """    <!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme Toggle -->
+    <style id="gh-admin-theme-styles">
+      html.dark {
+        color-scheme: dark !important;
+      }
+      #gh-admin-theme-toggle {
+        position: fixed;
+        top: 22px;
+        right: 26px;
+        z-index: 99999;
+        display: none;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        border-radius: 9999px;
+        font-size: 13px;
+        font-weight: 600;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        user-select: none;
+        outline: none;
+      }
+      #gh-admin-theme-toggle:hover {
+        transform: translateY(-1px);
+      }
+    </style>
+    <script id="gh-admin-theme-bootstrap">
+      (function() {
+        try {
+          var saved = localStorage.getItem('ghost-admin-theme') || localStorage.getItem('user-theme');
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var isDark = saved ? (saved === 'dark') : (prefersDark !== false);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.style.colorScheme = 'light';
+          }
+        } catch(e) {}
+      })();
+    </script>
+"""
+
+runtime_patch = """    <script id="gh-admin-theme-toggle-runtime">
+      (function() {
+        function initToggle() {
+          if (document.getElementById('gh-admin-theme-toggle')) return;
+          var btn = document.createElement('button');
+          btn.id = 'gh-admin-theme-toggle';
+          btn.setAttribute('type', 'button');
+          btn.setAttribute('aria-label', 'Toggle theme');
+
+          function isDark() {
+            return document.documentElement.classList.contains('dark');
+          }
+
+          function renderState() {
+            var dark = isDark();
+            if (dark) {
+              btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg><span>Dark</span>';
+              btn.style.background = 'rgba(255, 255, 255, 0.08)';
+              btn.style.color = '#ffffff';
+              btn.style.border = '1px solid rgba(255, 255, 255, 0.18)';
+              btn.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.35)';
+            } else {
+              btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg><span>Light</span>';
+              btn.style.background = 'rgba(255, 255, 255, 0.9)';
+              btn.style.color = '#0f172a';
+              btn.style.border = '1px solid rgba(15, 23, 42, 0.12)';
+              btn.style.boxShadow = '0 4px 20px rgba(15, 23, 42, 0.08)';
+            }
+          }
+
+          btn.onclick = function(e) {
+            e.preventDefault();
+            var nowDark = !isDark();
+            if (nowDark) {
+              document.documentElement.classList.add('dark');
+              document.documentElement.style.colorScheme = 'dark';
+              try {
+                localStorage.setItem('ghost-admin-theme', 'dark');
+                localStorage.setItem('user-theme', 'dark');
+              } catch(e) {}
+            } else {
+              document.documentElement.classList.remove('dark');
+              document.documentElement.style.colorScheme = 'light';
+              try {
+                localStorage.setItem('ghost-admin-theme', 'light');
+                localStorage.setItem('user-theme', 'light');
+              } catch(e) {}
+            }
+            renderState();
+          };
+
+          function checkVisibility() {
+            var isAuth = !!document.getElementById('admin-main') || !!document.querySelector('.gh-nav');
+            var hash = window.location.hash || '';
+            var isSignIn = hash.includes('signin') || hash.includes('signup') || hash.includes('setup') || hash.includes('reset') || hash === '' || hash === '#/';
+            if (!isAuth && isSignIn) {
+              btn.style.display = 'inline-flex';
+            } else {
+              btn.style.display = 'none';
+            }
+          }
+
+          renderState();
+          checkVisibility();
+          document.body.appendChild(btn);
+
+          window.addEventListener('hashchange', checkVisibility);
+          var observer = new MutationObserver(checkVisibility);
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', initToggle);
+        } else {
+          initToggle();
+        }
+      })();
+    </script>
+"""
+
+admin_candidates = [
+    os.path.join(ghost_dir, "current", "core", "built", "admin", "index.html"),
+]
+for v_dir in glob.glob(os.path.join(ghost_dir, "versions", "*", "core", "built", "admin", "index.html")):
+    if v_dir not in admin_candidates:
+        admin_candidates.append(v_dir)
+
+patched_count = 0
+for cand in admin_candidates:
+    if not os.path.isfile(cand):
+        continue
+    try:
+        with open(cand, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        
+        modified = False
+        if "gh-admin-theme-styles" not in content and "</head>" in content:
+            content = content.replace("</head>", head_patch + "  </head>", 1)
+            modified = True
+        if "gh-admin-theme-toggle-runtime" not in content and "</body>" in content:
+            content = content.replace("</body>", runtime_patch + "  </body>", 1)
+            modified = True
+            
+        if modified:
+            with open(cand, "w", encoding="utf-8") as f:
+                f.write(content)
+            patched_count += 1
+            print(f"  ✓ Injected theme toggle & synchronizer into: {cand}")
+    except Exception as exc:
+        print(f"  ⚠️ Admin patch warning for {cand}: {exc}")
+
+if patched_count > 0:
+    print(f"  ✓ Ghost Admin theme toggle successfully installed across {patched_count} entrypoint(s).")
+else:
+    print("  ✓ Ghost Admin theme toggle already in place.")
+PYEOF
+
 # 4. Social Thumbnail Image
 sudo mkdir -p "$GHOST_DIR/content/images"
 if fetch_verified_asset "og-image.png" "$GHOST_DIR/content/images/og-image.png" "raw" 2>/dev/null; then

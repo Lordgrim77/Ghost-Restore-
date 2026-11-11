@@ -1030,6 +1030,204 @@
     .gm-back-to-signin-btn:hover {
       color: #ffffff !important;
     }
+
+    /* ========================================================================
+       SHARE POST MODAL (DARK MODE - OBSIDIAN MONOCHROME)
+       ======================================================================== */
+    .gh-portal-popup-container.share,
+    .gh-portal-popup-container:has(.gh-portal-share),
+    .gh-portal-popup-container:has(.gh-portal-share-actions),
+    .gh-portal-popup-container:has(.gh-portal-share-preview) {
+      max-width: 560px !important;
+      width: 100% !important;
+      padding: 34px 30px !important;
+      border-radius: 24px !important;
+      background: linear-gradient(180deg, rgba(22, 27, 38, 0.94) 0%, rgba(12, 16, 24, 0.97) 100%) !important;
+      backdrop-filter: blur(40px) saturate(200%) !important;
+      -webkit-backdrop-filter: blur(40px) saturate(200%) !important;
+      border: 1px solid rgba(255, 255, 255, 0.16) !important;
+      box-shadow: 0 32px 72px -12px rgba(0, 0, 0, 0.95), 0 12px 30px rgba(0, 0, 0, 0.75) !important;
+    }
+
+    .gh-portal-share-header {
+      margin-bottom: 22px !important;
+    }
+    .gh-portal-share-header .gh-portal-main-title {
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      font-size: 22px !important;
+      font-weight: 700 !important;
+      letter-spacing: -0.02em !important;
+      text-align: left !important;
+    }
+
+    .gh-portal-share-preview {
+      background-color: rgba(255, 255, 255, 0.04) !important;
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      border-radius: 16px !important;
+      overflow: hidden !important;
+      transition: border-color 0.2s ease, background-color 0.2s ease !important;
+    }
+    .gh-portal-share-preview:hover {
+      background-color: rgba(255, 255, 255, 0.06) !important;
+      border-color: rgba(255, 255, 255, 0.2) !important;
+    }
+    .gh-portal-share-preview-image {
+      border-radius: 15px 15px 0 0 !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    }
+    .gh-portal-share-preview-content {
+      padding: 18px 20px !important;
+      gap: 12px !important;
+    }
+    .gh-portal-share-preview-title {
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      font-size: 18px !important;
+      font-weight: 700 !important;
+      line-height: 1.35 !important;
+      letter-spacing: -0.015em !important;
+    }
+    .gh-portal-share-preview-excerpt {
+      color: rgba(255, 255, 255, 0.72) !important;
+      -webkit-text-fill-color: rgba(255, 255, 255, 0.72) !important;
+      font-size: 14px !important;
+      line-height: 1.5 !important;
+    }
+    .gh-portal-share-preview-footer {
+      margin-top: 2px !important;
+    }
+    .gh-portal-share-preview-site {
+      color: rgba(255, 255, 255, 0.7) !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+    }
+    .gh-portal-share-preview-author {
+      color: rgba(255, 255, 255, 0.5) !important;
+      font-size: 13px !important;
+    }
+    .gh-portal-share-preview-separator {
+      color: rgba(255, 255, 255, 0.3) !important;
+    }
+
+    .gh-portal-share-actions {
+      display: flex !important;
+      align-items: center !important;
+      gap: 12px !important;
+      margin-top: 22px !important;
+    }
+
+    /* Primary Copy Link Button */
+    .gh-portal-share-action.copy {
+      background-color: #ffffff !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      -webkit-text-fill-color: #000000 !important;
+      border: 1px solid rgba(255, 255, 255, 0.95) !important;
+      border-radius: 12px !important;
+      height: 46px !important;
+      font-weight: 600 !important;
+      cursor: pointer !important;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+      box-shadow: 0 4px 14px rgba(255, 255, 255, 0.15) !important;
+    }
+    .gh-portal-share-action.copy:hover {
+      background-color: #f1f5f9 !important;
+      background: #f1f5f9 !important;
+      border-color: #f1f5f9 !important;
+      transform: translateY(-1px) !important;
+      box-shadow: 0 6px 20px rgba(255, 255, 255, 0.25) !important;
+    }
+    .gh-portal-share-action.copy .gh-portal-share-label {
+      color: #000000 !important;
+      -webkit-text-fill-color: #000000 !important;
+      font-size: 14px !important;
+      font-weight: 600 !important;
+    }
+    .gh-portal-share-action.copy .gh-portal-share-icon svg {
+      stroke: #000000 !important;
+      color: #000000 !important;
+      fill: none !important;
+    }
+
+    /* Secondary Social Actions */
+    .gh-portal-share-action:not(.copy) {
+      background-color: rgba(255, 255, 255, 0.08) !important;
+      border: 1px solid rgba(255, 255, 255, 0.16) !important;
+      border-radius: 12px !important;
+      height: 46px !important;
+      color: #ffffff !important;
+      cursor: pointer !important;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+    .gh-portal-share-action:not(.copy):hover {
+      background-color: rgba(255, 255, 255, 0.16) !important;
+      border-color: rgba(255, 255, 255, 0.3) !important;
+      transform: translateY(-1px) !important;
+    }
+    .gh-portal-share-action.twitter svg,
+    .gh-portal-share-action .x svg {
+      fill: #ffffff !important;
+    }
+    .gh-portal-share-action.email svg,
+    .gh-portal-share-action.more svg {
+      stroke: #ffffff !important;
+      color: #ffffff !important;
+    }
+
+    /* Dropdown More Menu */
+    .gh-portal-share-more-menu {
+      background: linear-gradient(180deg, #18202c 0%, #0f141c 100%) !important;
+      border: 1px solid rgba(255, 255, 255, 0.18) !important;
+      border-radius: 14px !important;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+      padding: 8px !important;
+    }
+    .gh-portal-share-more-item {
+      color: #e2e8f0 !important;
+      border-radius: 8px !important;
+      padding: 8px 12px !important;
+      transition: all 0.15s ease !important;
+    }
+    .gh-portal-share-more-item:hover {
+      background: rgba(255, 255, 255, 0.08) !important;
+      color: #ffffff !important;
+    }
+    .gh-portal-share-more-item svg {
+      color: #ffffff !important;
+      stroke: currentColor !important;
+    }
+
+    /* Responsive Mobile Layout */
+    @media (max-width: 580px) {
+      .gh-portal-popup-container.share,
+      .gh-portal-popup-container:has(.gh-portal-share) {
+        padding: 24px 18px !important;
+        margin: 16px auto !important;
+        width: calc(100% - 24px) !important;
+      }
+      .gh-portal-share-actions {
+        flex-wrap: wrap !important;
+        gap: 10px !important;
+      }
+      .gh-portal-share-action.copy {
+        min-width: 100% !important;
+        order: 1 !important;
+      }
+      .gh-portal-share-action:not(.copy) {
+        flex: 1 1 auto !important;
+        max-width: none !important;
+        order: 2 !important;
+      }
+      .gh-portal-share-more {
+        order: 2 !important;
+        flex: 1 1 auto !important;
+      }
+      .gh-portal-share-action.more {
+        width: 100% !important;
+        max-width: none !important;
+      }
+    }
   `;
 
   const lightCSS = `
@@ -1756,6 +1954,204 @@
     .gm-back-to-signin-btn:hover {
       color: #000000 !important;
     }
+
+    /* ========================================================================
+       SHARE POST MODAL (LIGHT MODE - OBSIDIAN MONOCHROME)
+       ======================================================================== */
+    .gh-portal-popup-container.share,
+    .gh-portal-popup-container:has(.gh-portal-share),
+    .gh-portal-popup-container:has(.gh-portal-share-actions),
+    .gh-portal-popup-container:has(.gh-portal-share-preview) {
+      max-width: 560px !important;
+      width: 100% !important;
+      padding: 34px 30px !important;
+      border-radius: 24px !important;
+      background: rgba(255, 255, 255, 0.96) !important;
+      backdrop-filter: blur(36px) saturate(190%) !important;
+      -webkit-backdrop-filter: blur(36px) saturate(190%) !important;
+      border: 1px solid rgba(0, 0, 0, 0.12) !important;
+      box-shadow: 0 32px 72px -12px rgba(15, 23, 42, 0.25), 0 12px 28px rgba(15, 23, 42, 0.12) !important;
+    }
+
+    .gh-portal-share-header {
+      margin-bottom: 22px !important;
+    }
+    .gh-portal-share-header .gh-portal-main-title {
+      color: #0f172a !important;
+      -webkit-text-fill-color: #0f172a !important;
+      font-size: 22px !important;
+      font-weight: 700 !important;
+      letter-spacing: -0.02em !important;
+      text-align: left !important;
+    }
+
+    .gh-portal-share-preview {
+      background-color: #f8fafc !important;
+      border: 1px solid rgba(0, 0, 0, 0.1) !important;
+      border-radius: 16px !important;
+      overflow: hidden !important;
+      transition: border-color 0.2s ease, background-color 0.2s ease !important;
+    }
+    .gh-portal-share-preview:hover {
+      background-color: #f1f5f9 !important;
+      border-color: rgba(0, 0, 0, 0.18) !important;
+    }
+    .gh-portal-share-preview-image {
+      border-radius: 15px 15px 0 0 !important;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+    }
+    .gh-portal-share-preview-content {
+      padding: 18px 20px !important;
+      gap: 12px !important;
+    }
+    .gh-portal-share-preview-title {
+      color: #0f172a !important;
+      -webkit-text-fill-color: #0f172a !important;
+      font-size: 18px !important;
+      font-weight: 700 !important;
+      line-height: 1.35 !important;
+      letter-spacing: -0.015em !important;
+    }
+    .gh-portal-share-preview-excerpt {
+      color: #475569 !important;
+      -webkit-text-fill-color: #475569 !important;
+      font-size: 14px !important;
+      line-height: 1.5 !important;
+    }
+    .gh-portal-share-preview-footer {
+      margin-top: 2px !important;
+    }
+    .gh-portal-share-preview-site {
+      color: #334155 !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+    }
+    .gh-portal-share-preview-author {
+      color: #64748b !important;
+      font-size: 13px !important;
+    }
+    .gh-portal-share-preview-separator {
+      color: #cbd5e1 !important;
+    }
+
+    .gh-portal-share-actions {
+      display: flex !important;
+      align-items: center !important;
+      gap: 12px !important;
+      margin-top: 22px !important;
+    }
+
+    /* Primary Copy Link Button */
+    .gh-portal-share-action.copy {
+      background-color: #0f172a !important;
+      background: #0f172a !important;
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      border: 1px solid #0f172a !important;
+      border-radius: 12px !important;
+      height: 46px !important;
+      font-weight: 600 !important;
+      cursor: pointer !important;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15) !important;
+    }
+    .gh-portal-share-action.copy:hover {
+      background-color: #1e293b !important;
+      background: #1e293b !important;
+      border-color: #1e293b !important;
+      transform: translateY(-1px) !important;
+      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25) !important;
+    }
+    .gh-portal-share-action.copy .gh-portal-share-label {
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      font-size: 14px !important;
+      font-weight: 600 !important;
+    }
+    .gh-portal-share-action.copy .gh-portal-share-icon svg {
+      stroke: #ffffff !important;
+      color: #ffffff !important;
+      fill: none !important;
+    }
+
+    /* Secondary Social Actions */
+    .gh-portal-share-action:not(.copy) {
+      background-color: #f1f5f9 !important;
+      border: 1px solid rgba(0, 0, 0, 0.1) !important;
+      border-radius: 12px !important;
+      height: 46px !important;
+      color: #0f172a !important;
+      cursor: pointer !important;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+    .gh-portal-share-action:not(.copy):hover {
+      background-color: #e2e8f0 !important;
+      border-color: rgba(0, 0, 0, 0.18) !important;
+      transform: translateY(-1px) !important;
+    }
+    .gh-portal-share-action.twitter svg,
+    .gh-portal-share-action .x svg {
+      fill: #0f172a !important;
+    }
+    .gh-portal-share-action.email svg,
+    .gh-portal-share-action.more svg {
+      stroke: #0f172a !important;
+      color: #0f172a !important;
+    }
+
+    /* Dropdown More Menu */
+    .gh-portal-share-more-menu {
+      background: #ffffff !important;
+      border: 1px solid rgba(0, 0, 0, 0.12) !important;
+      border-radius: 14px !important;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.15) !important;
+      padding: 8px !important;
+    }
+    .gh-portal-share-more-item {
+      color: #1e293b !important;
+      border-radius: 8px !important;
+      padding: 8px 12px !important;
+      transition: all 0.15s ease !important;
+    }
+    .gh-portal-share-more-item:hover {
+      background: #f1f5f9 !important;
+      color: #0f172a !important;
+    }
+    .gh-portal-share-more-item svg {
+      color: #0f172a !important;
+      stroke: currentColor !important;
+    }
+
+    /* Responsive Mobile Layout */
+    @media (max-width: 580px) {
+      .gh-portal-popup-container.share,
+      .gh-portal-popup-container:has(.gh-portal-share) {
+        padding: 24px 18px !important;
+        margin: 16px auto !important;
+        width: calc(100% - 24px) !important;
+      }
+      .gh-portal-share-actions {
+        flex-wrap: wrap !important;
+        gap: 10px !important;
+      }
+      .gh-portal-share-action.copy {
+        min-width: 100% !important;
+        order: 1 !important;
+      }
+      .gh-portal-share-action:not(.copy) {
+        flex: 1 1 auto !important;
+        max-width: none !important;
+        order: 2 !important;
+      }
+      .gh-portal-share-more {
+        order: 2 !important;
+        flex: 1 1 auto !important;
+      }
+      .gh-portal-share-action.more {
+        width: 100% !important;
+        max-width: none !important;
+      }
+    }
   `;
 
   function getIsDark() {
@@ -1834,7 +2230,26 @@
         }
       }
 
-      // 6. Ensure Forgot Password button and reset flow on Sign-in view
+      // 6. Enforce Share Modal Copy Button High-Contrast Color Scheme
+      const shareCopyBtns = doc.querySelectorAll('.gh-portal-share-action.copy');
+      for (let i = 0; i < shareCopyBtns.length; i++) {
+        const copyBtn = shareCopyBtns[i];
+        const copyLabel = copyBtn.querySelector('.gh-portal-share-label');
+        const copyIconSvg = copyBtn.querySelector('svg');
+        if (isDark) {
+          copyBtn.style.setProperty('background-color', '#ffffff', 'important');
+          copyBtn.style.setProperty('color', '#000000', 'important');
+          if (copyLabel) copyLabel.style.setProperty('color', '#000000', 'important');
+          if (copyIconSvg) copyIconSvg.style.setProperty('stroke', '#000000', 'important');
+        } else {
+          copyBtn.style.setProperty('background-color', '#0f172a', 'important');
+          copyBtn.style.setProperty('color', '#ffffff', 'important');
+          if (copyLabel) copyLabel.style.setProperty('color', '#ffffff', 'important');
+          if (copyIconSvg) copyIconSvg.style.setProperty('stroke', '#ffffff', 'important');
+        }
+      }
+
+      // 7. Ensure Forgot Password button and reset flow on Sign-in view
       ensureForgotPassword(doc);
     } catch (e) {}
   }
