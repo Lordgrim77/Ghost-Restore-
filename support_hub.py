@@ -624,6 +624,66 @@ class SupportVault:
         all_cases.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
         return all_cases[:limit]
 
+    def delete_case(self, case_code: str) -> Optional[Dict[str, Any]]:
+        """Permanently delete a support case and its child records/files across vault DBs."""
+        clean_code = (case_code or "").strip().lstrip("#").upper()
+        if not clean_code or not re.fullmatch(r"[A-Z0-9-]+", clean_code):
+            return None
+
+        deleted = False
+        ops_msg_ids: List[int] = []
+        tg_evidence_msgs: List[Tuple[int, int]] = []
+        local_filenames: List[str] = []
+
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    case_row = conn.execute(
+                        "SELECT case_code, telegram_message_id FROM cases WHERE case_code = ?",
+                        (clean_code,)
+                    ).fetchone()
+                    if not case_row:
+                        continue
+                    deleted = True
+                    if case_row["telegram_message_id"]:
+                        ops_msg_ids.append(int(case_row["telegram_message_id"]))
+
+                    ev_rows = conn.execute(
+                        "SELECT stored_filename, telegram_chat_id, telegram_message_id FROM evidence_files WHERE case_code = ?",
+                        (clean_code,)
+                    ).fetchall()
+                    for ev in ev_rows:
+                        if ev["stored_filename"]:
+                            local_filenames.append(str(ev["stored_filename"]))
+                        if ev["telegram_chat_id"] and ev["telegram_message_id"]:
+                            tg_evidence_msgs.append((int(ev["telegram_chat_id"]), int(ev["telegram_message_id"])))
+
+                    conn.execute("DELETE FROM evidence_files WHERE case_code = ?", (clean_code,))
+                    conn.execute("DELETE FROM messages WHERE case_code = ?", (clean_code,))
+                    conn.execute("DELETE FROM audit_logs WHERE case_code = ?", (clean_code,))
+                    conn.execute("DELETE FROM cases WHERE case_code = ?", (clean_code,))
+                    conn.commit()
+            except Exception as e:
+                logger.error("Failed deleting case %s from %s: %s", clean_code, db, e)
+
+        if not deleted:
+            return None
+
+        for fn in local_filenames:
+            try:
+                p = self.get_evidence_path(fn)
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+
+        return {
+            "case_code": clean_code,
+            "ops_telegram_message_ids": ops_msg_ids,
+            "evidence_tg_messages": tg_evidence_msgs,
+        }
+
 
 # =========================================================================
 # Support Telegram Bot Integration (Inline Keyboards & Two-Way Chat)
@@ -637,6 +697,7 @@ class SupportBotBridge:
         admin_chat_id: int,
         allowed_user_ids: Optional[Set[int]] = None,
         auth_callback: Optional[Callable[[int], bool]] = None,
+        super_admin_callback: Optional[Callable[[int], bool]] = None,
         ops_group_chat_id: Optional[int] = None,
         storage_chat_id: Optional[int] = None,
     ):
@@ -648,6 +709,7 @@ class SupportBotBridge:
         # Group 2: Dedicated Evidence Storage Group / Channel
         self.storage_chat_id = storage_chat_id
         self.auth_callback = auth_callback
+        self.super_admin_callback = super_admin_callback
         if allowed_user_ids is not None:
             self.allowed_user_ids: Set[int] = set(allowed_user_ids)
         elif admin_chat_id and admin_chat_id > 0:
@@ -742,6 +804,15 @@ class SupportBotBridge:
             return False
         return user_id in self.allowed_user_ids
 
+    def _is_super_admin(self, user_id: Optional[int]) -> bool:
+        """Fail-closed Super Admin privilege check for destructive case operations."""
+        if user_id is None or self.super_admin_callback is None:
+            return False
+        try:
+            return bool(self.super_admin_callback(user_id))
+        except Exception:
+            return False
+
     def _register_handlers(self):
         if not HAS_TELEGRAM or not self.app:
             return
@@ -754,7 +825,7 @@ class SupportBotBridge:
         except Exception as e:
             logger.warning("Could not register handlers on bot app (may already be registered in main): %s", e)
 
-    def make_case_keyboard(self, case_code: str, status: str, has_files: bool = False, msg_count: int = 0) -> Any:
+    def make_case_keyboard(self, case_code: str, status: str, has_files: bool = False, msg_count: int = 0, can_delete: bool = False) -> Any:
         if not HAS_TELEGRAM:
             return None
         # Row 1: Chat & History, and Evidence (if files exist)
@@ -764,17 +835,22 @@ class SupportBotBridge:
         if has_files:
             row1.append(InlineKeyboardButton("📎 Evidence", callback_data=f"case_evidence:{case_code}"))
 
-        # Row 2: Status Menu and Back button
+        # Row 2: Status Menu and (if Super Admin) Delete Case
         row2 = [
-            InlineKeyboardButton("⚙️ Change Status", callback_data=f"case_status_menu:{case_code}"),
-            InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list")
+            InlineKeyboardButton("⚙️ Change Status", callback_data=f"case_status_menu:{case_code}")
         ]
+        if can_delete:
+            row2.append(InlineKeyboardButton("🗑️ Delete Case", callback_data=f"case_delete_ask:{case_code}"))
+            row3 = [InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list")]
+            return InlineKeyboardMarkup([row1, row2, row3])
+
+        row2.append(InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list"))
         return InlineKeyboardMarkup([row1, row2])
 
-    def make_status_menu_keyboard(self, case_code: str) -> Any:
+    def make_status_menu_keyboard(self, case_code: str, can_delete: bool = False) -> Any:
         if not HAS_TELEGRAM:
             return None
-        return InlineKeyboardMarkup([
+        rows = [
             [
                 InlineKeyboardButton("🟡 Set: In Progress", callback_data=f"case_set_status:{case_code}:IN_REVIEW"),
                 InlineKeyboardButton("🟢 Set: Resolved", callback_data=f"case_set_status:{case_code}:CLOSED")
@@ -782,10 +858,11 @@ class SupportBotBridge:
             [
                 InlineKeyboardButton("⚪ Set: Closed / Dismissed", callback_data=f"case_set_status:{case_code}:REJECTED")
             ],
-            [
-                InlineKeyboardButton("⬅️ Cancel / Back", callback_data=f"case_view:{case_code}")
-            ]
-        ])
+        ]
+        if can_delete:
+            rows.append([InlineKeyboardButton("🗑️ Delete Case", callback_data=f"case_delete_ask:{case_code}")])
+        rows.append([InlineKeyboardButton("⬅️ Cancel / Back", callback_data=f"case_view:{case_code}")])
+        return InlineKeyboardMarkup(rows)
 
     def format_case_card(self, case_data: Dict[str, Any]) -> str:
         priority_emojis = {
@@ -903,7 +980,13 @@ class SupportBotBridge:
 
         text = self.format_case_card(case_data)
         has_files = bool(case_data.get("files"))
-        kb = self.make_case_keyboard(case_data["case_code"], case_data["status"], has_files=has_files, msg_count=0)
+        kb = self.make_case_keyboard(
+            case_data["case_code"],
+            case_data["status"],
+            has_files=has_files,
+            msg_count=0,
+            can_delete=self._is_super_admin(target_chat),
+        )
         try:
             msg = await self.app.bot.send_message(
                 chat_id=target_chat,
@@ -959,16 +1042,25 @@ class SupportBotBridge:
                 except Exception:
                     pass
             return
-        try:
-            await query.answer()
-        except Exception:
-            pass
-
         data = query.data or ""
         parts = data.split(":")
         action = parts[0] if parts else ""
         case_code = parts[1] if len(parts) > 1 else ""
         extra_param = parts[2] if len(parts) > 2 else ""
+        is_super = self._is_super_admin(caller_id)
+
+        if action in ("case_delete_ask", "case_delete_do") and not is_super:
+            try:
+                await query.answer("⛔ Permission denied.", show_alert=True)
+            except Exception:
+                pass
+            return
+
+        if action not in ("case_delete_ask", "case_delete_do", "case_evidence", "case_reply", "case_set_status"):
+            try:
+                await query.answer()
+            except Exception:
+                pass
 
         try:
             case_data = self.vault.get_case(case_code)
@@ -989,7 +1081,13 @@ class SupportBotBridge:
                 msgs = self.vault.get_messages(case_code)
                 has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, case_data.get("status", "SUBMITTED"), has_files=has_files, msg_count=len(msgs))
+                kb = self.make_case_keyboard(
+                    case_code,
+                    case_data.get("status", "SUBMITTED"),
+                    has_files=has_files,
+                    msg_count=len(msgs),
+                    can_delete=is_super,
+                )
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
@@ -1013,7 +1111,7 @@ class SupportBotBridge:
                     f"Current Status: <b>{st_name}</b>\n\n"
                     f"Choose an updated status for this case:"
                 )
-                kb = self.make_status_menu_keyboard(case_code)
+                kb = self.make_status_menu_keyboard(case_code, can_delete=is_super)
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
@@ -1034,7 +1132,7 @@ class SupportBotBridge:
                 except Exception:
                     pass
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, new_st, has_files=has_files, msg_count=len(msgs))
+                kb = self.make_case_keyboard(case_code, new_st, has_files=has_files, msg_count=len(msgs), can_delete=is_super)
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
@@ -1047,7 +1145,7 @@ class SupportBotBridge:
                 msgs = self.vault.get_messages(case_code)
                 has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, "IN_REVIEW", has_files=has_files, msg_count=len(msgs))
+                kb = self.make_case_keyboard(case_code, "IN_REVIEW", has_files=has_files, msg_count=len(msgs), can_delete=is_super)
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
@@ -1060,7 +1158,7 @@ class SupportBotBridge:
                 msgs = self.vault.get_messages(case_code)
                 has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, "CLOSED", has_files=has_files, msg_count=len(msgs))
+                kb = self.make_case_keyboard(case_code, "CLOSED", has_files=has_files, msg_count=len(msgs), can_delete=is_super)
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
@@ -1073,12 +1171,83 @@ class SupportBotBridge:
                 msgs = self.vault.get_messages(case_code)
                 has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
-                kb = self.make_case_keyboard(case_code, "REJECTED", has_files=has_files, msg_count=len(msgs))
+                kb = self.make_case_keyboard(case_code, "REJECTED", has_files=has_files, msg_count=len(msgs), can_delete=is_super)
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         pass
+
+            elif action == "case_delete_ask":
+                if not is_super:
+                    try:
+                        await query.answer("⛔ Permission denied.", show_alert=True)
+                    except Exception:
+                        pass
+                    return
+                try:
+                    await query.answer()
+                except Exception:
+                    pass
+                subj = html.escape(str(case_data.get("subject") or "No Subject"))
+                confirm_text = (
+                    f"⚠️ <b>Delete #{html.escape(case_code)}?</b>\n\n"
+                    f"<b>Subject:</b> {subj}\n\n"
+                    f"This permanently removes the case, messages, and evidence records."
+                )
+                kb = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("✅ Yes, Delete", callback_data=f"case_delete_do:{case_code}"),
+                        InlineKeyboardButton("❌ Cancel", callback_data=f"case_view:{case_code}"),
+                    ]
+                ])
+                try:
+                    await query.edit_message_text(text=confirm_text, parse_mode=ParseMode.HTML, reply_markup=kb)
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        raise
+
+            elif action == "case_delete_do":
+                if not is_super:
+                    try:
+                        await query.answer("⛔ Permission denied.", show_alert=True)
+                    except Exception:
+                        pass
+                    return
+                del_info = self.vault.delete_case(case_code)
+                if not del_info:
+                    try:
+                        await query.answer(f"❌ Case #{case_code} not found.", show_alert=True)
+                    except Exception:
+                        pass
+                    return
+
+                for uid_key in [u for u, cc in self.active_reply_sessions.items() if cc == case_code]:
+                    self.active_reply_sessions.pop(uid_key, None)
+                for mid_key in [m for m, cc in self.msg_to_case.items() if cc == case_code]:
+                    self.msg_to_case.pop(mid_key, None)
+
+                bot_client = getattr(context, "bot", None) or (self.app.bot if self.app else None)
+                if bot_client:
+                    for tg_cid, tg_mid in del_info.get("evidence_tg_messages", []):
+                        try:
+                            await bot_client.delete_message(chat_id=tg_cid, message_id=tg_mid)
+                        except Exception:
+                            pass
+
+                try:
+                    await query.answer(f"Deleted #{case_code}")
+                except Exception:
+                    pass
+                try:
+                    await query.edit_message_text(
+                        text=f"🗑️ Case <b>#{html.escape(case_code)}</b> deleted.",
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list")]])
+                    )
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        raise
 
             elif action == "case_evidence":
                 files = case_data.get("files", [])
@@ -2212,6 +2381,7 @@ def init_support_hub(
     host: str = "127.0.0.1",
     allowed_user_ids: Optional[Set[int]] = None,
     auth_callback: Optional[Callable[[int], bool]] = None,
+    super_admin_callback: Optional[Callable[[int], bool]] = None,
     ops_group_chat_id: Optional[int] = None,
     storage_chat_id: Optional[int] = None,
 ) -> SupportApiServer:
@@ -2223,6 +2393,7 @@ def init_support_hub(
         admin_chat_id=admin_chat_id,
         allowed_user_ids=allowed_user_ids,
         auth_callback=auth_callback,
+        super_admin_callback=super_admin_callback,
         ops_group_chat_id=ops_group_chat_id,
         storage_chat_id=storage_chat_id,
     )

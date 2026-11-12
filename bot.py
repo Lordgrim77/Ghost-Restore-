@@ -448,7 +448,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Enforce strict Role-Based Access Control BEFORE answering callback query
     # so denied users see the alert modal and SupportBotBridge can display status alerts.
     SUPPORT_CALLBACKS = ("main_menu", "menu_cases_list", "menu_help")
-    is_support_action = (data in SUPPORT_CALLBACKS) or data.startswith("case_")
+    SUPER_ADMIN_CASE_ACTIONS = ("case_delete_ask", "case_delete_do")
+    case_action = data.split(":", 1)[0] if data.startswith("case_") else ""
+    is_support_action = (
+        (data in SUPPORT_CALLBACKS)
+        or (data.startswith("case_") and case_action not in SUPER_ADMIN_CASE_ACTIONS)
+    )
     if not is_super_admin(user.id) and not is_support_action:
         await send_super_admin_only(update)
         return
@@ -1080,7 +1085,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• *Restore Backup* — Restore a saved archive.\n"
                 "• *GitHub Sync* — Push or restore content via GitHub.\n"
                 "• *Support Cases* — View & reply to cases (`/cases`).\n"
-                "• *Commands:* `/url <link>`, `/restore <path>`, `/admins`, `/add_admin <id>`, `/remove_admin <id>`, `/id`"
+                "• *Commands:* `/url <link>`, `/restore <path>`, `/delete_case <id>`, `/admins`, `/add_admin <id>`, `/remove_admin <id>`, `/id`"
             )
         else:
             help_text = (
@@ -1287,6 +1292,54 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if support_api_server and support_api_server.bridge:
         await support_api_server.bridge.cancel_command(update, context)
+
+
+async def delete_case_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompt confirmation to permanently delete a support case (Super Admin Only)."""
+    if not await require_super_admin(update):
+        return
+
+    if not support_api_server or not support_api_server.vault:
+        await update.message.reply_text("⚠️ Support system is offline.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "ℹ️ *Usage:* `/delete_case <case_code>`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    case_code = context.args[0].strip().lstrip("#").upper()
+    if not re.fullmatch(r"[A-Z0-9-]+", case_code):
+        await update.message.reply_text("❌ Invalid case code.")
+        return
+
+    case_data = support_api_server.vault.get_case(case_code)
+    if not case_data:
+        await update.message.reply_text(
+            f"❌ Case `{md_code(case_code)}` not found.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    subj = md_escape(str(case_data.get("subject") or "No Subject"))
+    text = (
+        f"⚠️ *Delete #{case_code}?*\n\n"
+        f"*Subject:* {subj}\n\n"
+        f"This permanently removes the case, messages, and evidence records."
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Yes, Delete", callback_data=f"case_delete_do:{case_code}"),
+            InlineKeyboardButton("❌ Cancel", callback_data=f"case_view:{case_code}"),
+        ]
+    ]
+    await update.message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1817,6 +1870,7 @@ async def post_init(application: Application):
             host=SUPPORT_HOST,
             allowed_user_ids=_effective_allowed_user_ids(),
             auth_callback=is_authorized,
+            super_admin_callback=is_super_admin,
             ops_group_chat_id=EFFECTIVE_OPS_CHAT_ID,
             storage_chat_id=STORAGE_CHAT_ID,
         )
@@ -1867,6 +1921,7 @@ def main():
             host=SUPPORT_HOST,
             allowed_user_ids=_effective_allowed_user_ids(),
             auth_callback=is_authorized,
+            super_admin_callback=is_super_admin,
             ops_group_chat_id=EFFECTIVE_OPS_CHAT_ID,
             storage_chat_id=STORAGE_CHAT_ID,
         )
@@ -1928,6 +1983,7 @@ def main():
     app.add_handler(CommandHandler(["github_status", "gh_status"], github_status_command))
     app.add_handler(CommandHandler("cases", cases_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
+    app.add_handler(CommandHandler("delete_case", delete_case_command))
     app.add_handler(CommandHandler("url", url_command))
     app.add_handler(CommandHandler("restore", restore_command))
     app.add_handler(CallbackQueryHandler(handle_callback))
@@ -1951,6 +2007,7 @@ def main():
             host=SUPPORT_HOST,
             allowed_user_ids=_effective_allowed_user_ids(),
             auth_callback=is_authorized,
+            super_admin_callback=is_super_admin,
             ops_group_chat_id=EFFECTIVE_OPS_CHAT_ID,
             storage_chat_id=STORAGE_CHAT_ID,
         )
