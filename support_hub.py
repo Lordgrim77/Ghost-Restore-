@@ -695,13 +695,10 @@ class SupportBotBridge:
                 bio.name = clean_name
                 now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 caption = (
-                    f"📦 <b>EVIDENCE VAULT RECORD</b>\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"Case: <code>#{html.escape(case_code)}</code>\n"
-                    f"File: <code>{html.escape(clean_name)}</code>\n"
-                    f"Size: {len(clean_data):,} bytes\n"
+                    f"📦 <b>Case #{html.escape(case_code)}</b>\n"
+                    f"File: <code>{html.escape(clean_name)}</code> ({len(clean_data):,} bytes)\n"
                     f"SHA-256: <code>{sha256}</code>\n"
-                    f"Archived: {now_str}"
+                    f"Time: {now_str}"
                 )
                 sent_msg = await self.app.bot.send_document(
                     chat_id=self.storage_chat_id,
@@ -866,23 +863,22 @@ class SupportBotBridge:
         status_tag = "🟡 New" if raw_status == "SUBMITTED" else ("🟠 In Progress" if raw_status == "IN_REVIEW" else "🟢 Resolved")
 
         lines = [
-            f"💬 <b>Conversation Thread: #{case_code}</b>",
-            f"Subject: <b>{subject}</b>  ·  Status: <b>{status_tag}</b>",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            f"💬 <b>Case #{case_code} Thread</b>",
+            f"<b>{subject}</b> · {status_tag}",
+            ""
         ]
 
         if not msgs:
-            lines.append("<i>No messages exchanged yet. Tap 'Send Reply' below to start the conversation with the reporter.</i>")
+            lines.append("<i>No messages yet. Tap Send Reply below to start.</i>")
         else:
             for m in msgs[-10:]:
                 is_admin = m.get("sender_type") == "admin"
-                sender_label = "🛡️ Support Team" if is_admin else f"👤 Reporter ({html.escape(m.get('sender_name') or 'User')})"
+                sender_label = "🛡️ Support" if is_admin else f"👤 {html.escape(m.get('sender_name') or 'Reporter')}"
                 time_str = str(m.get("created_at") or "")[11:16]
                 m_text = html.escape(m.get("message_text") or "")
-                lines.append(f"<b>{sender_label}</b>  ·  <i>{time_str} UTC</i>\n<blockquote>{m_text}</blockquote>")
+                lines.append(f"<b>{sender_label}</b> · <i>{time_str} UTC</i>\n<blockquote>{m_text}</blockquote>")
 
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append(f"<i>Total {len(msgs)} message(s) in case history.</i>")
+        lines.append(f"\n<i>{len(msgs)} message(s)</i>")
         text = "\n".join(lines)
 
         buttons = [
@@ -929,11 +925,9 @@ class SupportBotBridge:
 
         import html
         text = (
-            f"💬 <b>New Message on Case #{case_code}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💬 <b>New Reply on #{case_code}</b>\n\n"
             f"<blockquote>{html.escape(message_text)}</blockquote>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"<i>Reply directly to this notification in the group, or tap below:</i>"
+            f"<i>Reply to this message or tap below:</i>"
         )
         kb = InlineKeyboardMarkup([
             [
@@ -980,7 +974,7 @@ class SupportBotBridge:
             case_data = self.vault.get_case(case_code)
             if not case_data:
                 try:
-                    await query.answer(f"❌ Case #{case_code} not found in secure vault.", show_alert=True)
+                    await query.answer(f"❌ Case #{case_code} not found.", show_alert=True)
                 except Exception:
                     pass
                 try:
@@ -1118,7 +1112,7 @@ class SupportBotBridge:
                         try:
                             await query.message.reply_document(
                                 document=tg_fid,
-                                caption=caption + "\n<i>(Retrieved from Telegram Storage Group)</i>",
+                                caption=caption,
                                 parse_mode=ParseMode.HTML
                             )
                             sent_count += 1
@@ -1148,20 +1142,19 @@ class SupportBotBridge:
 
                 if sent_count > 0:
                     await query.message.reply_text(
-                        f"✅ Delivered <b>{sent_count}</b> evidence file(s) for case <b>#{html.escape(case_code)}</b>.",
+                        f"✅ Sent <b>{sent_count}</b> file(s) for <b>#{html.escape(case_code)}</b>.",
                         parse_mode=ParseMode.HTML
                     )
 
             elif action == "case_reply":
                 self.active_reply_sessions[query.from_user.id] = case_code
                 try:
-                    await query.answer("💬 Reply Mode Active! Type your message.")
+                    await query.answer("💬 Reply Mode Active")
                 except Exception:
                     pass
                 await query.message.reply_text(
-                    f"💬 <b>Reply Mode Active for #{html.escape(case_code)}</b>\n"
-                    f"Please type your message below. It will be delivered directly to the reporter's live web portal.\n"
-                    f"<i>(Send /cancel to abort)</i>",
+                    f"💬 <b>Replying to #{html.escape(case_code)}</b>\n"
+                    f"Type your message below. Send /cancel to stop.",
                     parse_mode=ParseMode.HTML
                 )
 
@@ -1254,9 +1247,9 @@ class SupportBotBridge:
         )
 
         await update.message.reply_text(
-            f"✓ <b>Message delivered to reporter for #{html.escape(case_code)} by {html.escape(admin_name)}</b>\n"
+            f"✓ <b>Sent to #{html.escape(case_code)}</b> ({html.escape(admin_name)})\n"
             f"<blockquote>{html.escape(final_text)}</blockquote>\n"
-            f"<i>(Active collaborative reply mode. Type more to reply, or send /cancel to end.)</i>",
+            f"<i>Reply mode active · /cancel to stop</i>",
             parse_mode=ParseMode.HTML
         )
 
@@ -1272,7 +1265,7 @@ class SupportBotBridge:
             await update.message.reply_text("ℹ️ No support cases currently on record.")
             return
 
-        lines = ["📋 <b>Recent Support & Evidence Cases:</b>\n"]
+        lines = ["📋 <b>Recent Cases</b>\n"]
         buttons = []
         for c in cases:
             cc_raw = str(c.get('case_code') or 'UNKNOWN')
@@ -1285,11 +1278,11 @@ class SupportBotBridge:
             sub_raw = str(c.get('subject') or 'No Subject')
             sub = html.escape(sub_raw[:30])
             lines.append(
-                f"• <b>#{cc}</b> [{cp}] - {cg}\n"
-                f"   Status: <b>{cs}</b> | Subject: {sub}...\n"
+                f"• <b>#{cc}</b> [{cp}] · {cg}\n"
+                f"  <b>{cs}</b> — {sub}\n"
             )
             buttons.append([InlineKeyboardButton(f"{st_icon} #{cc_raw} - {sub_raw[:22]}", callback_data=f"case_view:{cc_raw}")])
-        lines.append("<i>Tap a case button below to open its full card, evidence, and reply thread.</i>")
+        lines.append("<i>Select a case below:</i>")
         kb = InlineKeyboardMarkup(buttons) if HAS_TELEGRAM and buttons else None
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=kb)
 

@@ -320,7 +320,7 @@ def get_main_menu_keyboard():
             InlineKeyboardButton("♻️ Restore Backup", callback_data="menu_restore_list"),
         ],
         [
-            InlineKeyboardButton("🐙 GitHub Sync (Private)", callback_data="menu_github"),
+            InlineKeyboardButton("🐙 GitHub Sync", callback_data="menu_github"),
             InlineKeyboardButton("📊 Ghost Status", callback_data="menu_status"),
         ],
         [
@@ -339,7 +339,7 @@ def get_support_admin_menu_keyboard():
     """Build the restricted inline keyboard for Normal Admins (Support Cases Only)."""
     keyboard = [
         [InlineKeyboardButton("🛡️ Support Cases", callback_data="menu_cases_list")],
-        [InlineKeyboardButton("ℹ️ Support Help", callback_data="menu_help")],
+        [InlineKeyboardButton("ℹ️ Help", callback_data="menu_help")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -349,45 +349,36 @@ def _build_role_menu(user) -> tuple:
     first_name = md_escape(getattr(user, "first_name", None) or "Admin")
     if is_super_admin(getattr(user, "id", None)):
         status = ghost_mgr.get_status()
-        state_emoji = "🟢 Online" if status.get("running") else "🔴 Offline / Inactive"
+        state_emoji = "🟢 Online" if status.get("running") else "🔴 Offline"
         text = (
-            f"👻 *Ghost Publication Manager*\n\n"
-            f"Welcome, *{first_name}*! _(👑 Super Admin — Full Control)_\n"
-            f"Use the buttons below to manage Ghost, backups, GitHub sync, and support cases.\n\n"
+            f"👻 *Ghost Manager*\n\n"
+            f"Welcome, *{first_name}*.\n\n"
             f"🌐 *Status:* {state_emoji}\n"
             f"🔗 *URL:* `{md_code(status.get('url', 'N/A'))}`\n"
-            f"📁 *Ghost Directory:* `{md_code(GHOST_DIR)}`\n"
-            f"💾 *Total Backups:* `{status.get('total_backups', 0)}`\n"
+            f"💾 *Backups:* `{status.get('total_backups', 0)}`\n"
         )
         return text, get_main_menu_keyboard()
 
     text = (
-        f"🛡️ *Support & Incident Management Portal*\n\n"
-        f"Welcome, *{first_name}*!\n"
-        f"👤 *Role:* Normal Admin _(Support Operations Only)_\n\n"
-        f"Use the button below or send `/cases` to view and manage support cases, "
-        f"inspect evidence, and communicate with reporters."
+        f"🛡️ *Support Cases*\n\n"
+        f"Welcome, *{first_name}*.\n"
+        f"Tap below or send `/cases` to view and manage support cases."
     )
     return text, get_support_admin_menu_keyboard()
 
 
 async def send_unauthorized(update: Update):
-    """Notify unauthorized user with clear authorization instructions."""
+    """Notify unauthorized user without exposing internal configuration."""
     uid = update.effective_user.id if update.effective_user else "Unknown"
     text = (
         f"⛔ *Access Denied*\n\n"
-        f"Your Telegram User ID is `{uid}`.\n\n"
-        f"This bot enforces fail-closed authorization for security. To grant access, add your ID to `.env`:\n"
-        f"• Support Admin: `ALLOWED_USER_IDS=...,{uid}`\n"
-        f"• Super Admin: `SUPER_ADMIN_IDS=...,{uid}`\n\n"
-        f"Then restart the service:\n"
-        f"`sudo systemctl restart ghost-telegram-bot`"
+        f"Your User ID: `{uid}`"
     )
     if update.callback_query:
         chat = update.effective_chat
         is_group = bool(chat and getattr(chat, "type", "") in ("group", "supergroup", "channel"))
         try:
-            await update.callback_query.answer(f"⛔ Access Denied. Your User ID is {uid}", show_alert=True)
+            await update.callback_query.answer(f"⛔ Access Denied ({uid})", show_alert=True)
         except Exception:
             pass
         if not is_group:
@@ -400,24 +391,19 @@ async def send_unauthorized(update: Update):
 
 
 async def send_super_admin_only(update: Update):
-    """Notify Normal Admin that requested control requires Super Admin privileges."""
-    uid = update.effective_user.id if update.effective_user else "Unknown"
+    """Notify Normal Admin that requested control requires higher privileges."""
     if update.callback_query:
         try:
             await update.callback_query.answer(
-                "⛔ Super Admin Only: Your role is restricted to Support Cases management.",
+                "⛔ Permission denied.",
                 show_alert=True
             )
         except Exception:
             pass
     elif update.message:
         text = (
-            f"⛔ *Super Admin Access Required*\n\n"
-            f"👤 *Your Role:* Normal Admin _(Support Operations Only)_\n"
-            f"🆔 *Your User ID:* `{uid}`\n\n"
-            f"System backups, restores, Ghost CMS control, GitHub sync, and admin management "
-            f"are restricted to *Super Admins*.\n\n"
-            f"Use `/cases` or `/start` to view and manage support cases."
+            f"⛔ *Permission Denied*\n\n"
+            f"You only have access to Support Cases (`/cases`)."
         )
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -808,9 +794,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cases = support_api_server.vault.list_recent_cases(limit=8)
         if not cases:
             text = (
-                "🛡️ *Confidential Support & Incident Cases*\n\n"
-                "ℹ️ No cases currently recorded.\n"
-                "New submissions from the `/support/` portal will alert you directly here in real time."
+                "🛡️ *Support Cases*\n\n"
+                "ℹ️ No cases found."
             )
             keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
             try:
@@ -825,8 +810,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         text = (
-            "🛡️ *Confidential Support & Incident Cases*\n\n"
-            "Select an incident case to review, download evidence, or message the reporter:"
+            "🛡️ *Support Cases*\n\n"
+            "Select a case below:"
         )
         keyboard = []
         for c in cases:
@@ -864,11 +849,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
         else:
             try:
-                await query.answer("⚠️ Support Hub Vault is initializing or offline.", show_alert=True)
+                await query.answer("⚠️ Support system is offline.", show_alert=True)
             except Exception:
                 pass
             await query.edit_message_text(
-                "⚠️ *Support Hub Vault is initializing or offline.*",
+                "⚠️ *Support system is offline.*",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]),
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -1090,30 +1075,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu_help":
         if is_super_admin(user.id):
             help_text = (
-                "ℹ️ *Ghost Telegram Bot Help (👑 Super Admin)*\n\n"
-                "• *📦 Create Backup:* Takes a complete snapshot of custom themes, uploaded images, "
-                "routes, and database (MySQL/SQLite) into a single `.zip` archive. "
-                "If under 48 MB, sends it directly in this chat!\n\n"
-                "• *♻️ Restore Backup:* Restores a saved backup. Auto-fixes path slashes, protects default "
-                "Ghost theme symlinks (`casper`/`source`), syncs database, and restarts Ghost.\n\n"
-                "• *🐙 GitHub Sync (Private):* Save unzipped posts, pages, images, and database to a private GitHub repo. "
-                "Never syncs support vault or evidence files. 1-click restore available directly from GitHub!\n\n"
-                "• *🛡️ Support & Incident Cases:* View confidential incident cases submitted via the `/support/` portal, "
-                "inspect metadata-scrubbed evidence files, update status (In Review, Closed, Rejected), and chat directly with reporters.\n\n"
-                "• *🔗 URL Download:* Send `/url <link>` to download and restore any backup hosted online.\n"
-                "• *📁 Local Restore:* Send `/restore /path/to/backup.zip` to restore any file on the server.\n"
-                "• *👥 Admin Roles:* Send `/admins`, `/add_admin <user_id>`, `/remove_admin <user_id>`, or `/id`."
+                "ℹ️ *Help*\n\n"
+                "• *Create Backup* — Save themes, media, settings & database.\n"
+                "• *Restore Backup* — Restore a saved archive.\n"
+                "• *GitHub Sync* — Push or restore content via GitHub.\n"
+                "• *Support Cases* — View & reply to cases (`/cases`).\n"
+                "• *Commands:* `/url <link>`, `/restore <path>`, `/admins`, `/add_admin <id>`, `/remove_admin <id>`, `/id`"
             )
         else:
             help_text = (
-                "ℹ️ *Support Operations Bot Help (👤 Normal Admin)*\n\n"
-                "Your account is authorized to view and manage *Support & Incident Cases*:\n\n"
-                "• *🛡️ View Cases:* Tap *Support Cases* or send `/cases` to browse recent cases.\n"
-                "• *💬 Reply to Reporter:* Open a case card and tap *Chat & History* -> *Send Reply* (or reply directly to a case card inside the Ops Group).\n"
-                "• *📎 Evidence:* Tap *Evidence* on a case card to receive submitted attachments, or reply with photos/documents to attach them.\n"
-                "• *⚙️ Status Updates:* Use *Change Status* to mark cases In Progress, Resolved, or Closed/Dismissed.\n"
-                "• *❌ End Reply:* Send `/cancel` to leave active reply mode.\n"
-                "• *🆔 Diagnostics:* Send `/id` to inspect your User ID and Chat ID."
+                "ℹ️ *Help*\n\n"
+                "• `/cases` — View and manage support cases.\n"
+                "• *Chat & History* — Reply to reporters or view messages.\n"
+                "• *Evidence* — View or attach case files.\n"
+                "• `/cancel` — Exit reply mode.\n"
+                "• `/id` — Show your Telegram ID."
             )
         keyboard = [[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")]]
         await query.edit_message_text(
@@ -1167,9 +1143,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Outside support case replies, document uploads are server backup restores -> Super Admin Only!
     if not is_super_admin(user.id):
         await update.message.reply_text(
-            "⛔ *Super Admin Access Required*\n\n"
-            "Normal Admins cannot upload Ghost server backup archives.\n"
-            "💡 _To attach files to a support case, open `/cases` and tap 'Send Reply' or reply directly to a case message first._",
+            "⛔ *Permission Denied*\n\n"
+            "To attach a file to a support case, open `/cases` and start a reply first.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_support_admin_menu_keyboard()
         )
@@ -1286,12 +1261,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
         if is_super_admin(user.id):
             await update.message.reply_text(
-                "ℹ️ Use the menu buttons below to manage Ghost, or type /start.",
+                "ℹ️ Use the menu below or type /start.",
                 reply_markup=get_main_menu_keyboard()
             )
         else:
             await update.message.reply_text(
-                "ℹ️ Use the button below to view and manage Support Cases, or type /cases.",
+                "ℹ️ Tap below or type /cases to manage support cases.",
                 reply_markup=get_support_admin_menu_keyboard()
             )
 
@@ -1315,74 +1290,51 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Report Telegram ID diagnostics and RBAC role for users and groups/channels."""
+    """Report Telegram user and chat IDs."""
     user = update.effective_user
     chat = update.effective_chat
     uid = user.id if user else "Unknown"
     cid = chat.id if chat else "Unknown"
-    ctype = getattr(chat, "type", "Unknown") if chat else "Unknown"
-
-    if user and is_super_admin(user.id):
-        role_status = "👑 Super Admin (Full Control)"
-    elif user and is_normal_admin(user.id):
-        role_status = "👤 Normal Admin (Support Cases Only)"
-    else:
-        role_status = "❌ Unauthorized"
 
     text = (
-        f"🆔 *Telegram Diagnostics*\n\n"
-        f"👤 *Your User ID:* `{uid}`\n"
-        f"💬 *Current Chat ID:* `{cid}`\n"
-        f"🏷️ *Chat Type:* `{ctype}`\n"
-        f"🛡️ *Role / Access:* {role_status}\n\n"
-        f"• For Group 1 (Ops), set: `OPS_GROUP_CHAT_ID={cid}`\n"
-        f"• For Group 2 (Storage), set: `STORAGE_CHAT_ID={cid}`\n"
-        f"• For Normal Admin (Support Only): `ALLOWED_USER_IDS=...,{uid}`\n"
-        f"• For Super Admin (Full Control): `SUPER_ADMIN_IDS=...,{uid}`"
+        f"🆔 *Telegram ID*\n\n"
+        f"• *User ID:* `{uid}`\n"
+        f"• *Chat ID:* `{cid}`"
     )
     if update.message:
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
 async def admins_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display Super Admins, Normal Admins, and group routing configurations (Super Admin Only)."""
+    """Display configured admins (Super Admin Only)."""
     if not await require_super_admin(update):
         return
 
     super_admins = sorted(list(_effective_super_admin_ids()))
     normal_admins = sorted(list(_effective_normal_admin_ids()))
-    super_lines = "\n".join([f"• `{uid}`" for uid in super_admins]) if super_admins else "• _None configured_"
-    normal_lines = "\n".join([f"• `{uid}`" for uid in normal_admins]) if normal_admins else "• _None configured_"
-    ops_display = f"`{EFFECTIVE_OPS_CHAT_ID}`" if EFFECTIVE_OPS_CHAT_ID else "_Not set (direct alerts disabled)_"
-    storage_display = f"`{STORAGE_CHAT_ID}`" if STORAGE_CHAT_ID else "_Not set (falling back to local vault)_"
+    super_lines = "\n".join([f"• `{uid}`" for uid in super_admins]) if super_admins else "• _None_"
+    normal_lines = "\n".join([f"• `{uid}`" for uid in normal_admins]) if normal_admins else "• _None_"
 
     text = (
-        f"🛡️ *Admin Team & Role Permissions*\n\n"
-        f"👑 *Super Admins ({len(super_admins)}) — Full Control:*\n"
+        f"🛡️ *Admins*\n\n"
+        f"*Full Access ({len(super_admins)}):*\n"
         f"{super_lines}\n\n"
-        f"👤 *Normal Admins ({len(normal_admins)}) — Support Cases Only:*\n"
+        f"*Support Only ({len(normal_admins)}):*\n"
         f"{normal_lines}\n\n"
-        f"💬 *Group 1 (Collaborative Ops):* {ops_display}\n"
-        f"📦 *Group 2 (Evidence Storage Vault):* {storage_display}\n\n"
-        f"⚙️ *Manage Normal Admins:*\n"
-        f"• Add: `/add_admin <user_id>`\n"
-        f"• Remove: `/remove_admin <user_id>`\n"
-        f"_(Super Admins are managed via `SUPER_ADMIN_IDS` in `.env`)_"
+        f"`/add_admin <user_id>` · `/remove_admin <user_id>`"
     )
     if update.message:
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
 async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Grant Normal Admin (Support Cases only) access to a Telegram User ID (Super Admin Only)."""
+    """Grant Support-only admin access to a Telegram User ID (Super Admin Only)."""
     if not await require_super_admin(update):
         return
 
     if not context.args or not context.args[0].strip().isdigit():
         await update.message.reply_text(
-            "ℹ️ *Usage:* `/add_admin <telegram_user_id>`\n\n"
-            "Grants a user *Normal Admin* access (view & manage support cases only). "
-            "Have them send `/id` in private or in the group to find their numeric User ID.",
+            "ℹ️ *Usage:* `/add_admin <user_id>`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -1394,14 +1346,14 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_super_admin(target_uid):
         await update.message.reply_text(
-            f"ℹ️ User `{target_uid}` is already a *👑 Super Admin* (has full control including Support Cases).",
+            f"ℹ️ `{target_uid}` already has full access.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
 
     if target_uid in ALLOWED_USER_IDS:
         await update.message.reply_text(
-            f"ℹ️ User `{target_uid}` already has *👤 Normal Admin* access.",
+            f"ℹ️ `{target_uid}` is already a support admin.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -1412,20 +1364,19 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         support_api_server.bridge.allowed_user_ids = _effective_allowed_user_ids()
 
     await update.message.reply_text(
-        f"✅ User `{target_uid}` added as a *👤 Normal Admin* (Support Cases Only).\n"
-        f"Access is active immediately and persisted to `.env`.",
+        f"✅ Added `{target_uid}` to support admins.",
         parse_mode=ParseMode.MARKDOWN
     )
 
 
 async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Revoke Normal Admin access from a Telegram User ID (Super Admin Only)."""
+    """Revoke Support-only admin access from a Telegram User ID (Super Admin Only)."""
     if not await require_super_admin(update):
         return
 
     if not context.args or not context.args[0].strip().isdigit():
         await update.message.reply_text(
-            "ℹ️ *Usage:* `/remove_admin <telegram_user_id>`",
+            "ℹ️ *Usage:* `/remove_admin <user_id>`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -1433,14 +1384,14 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
     target_uid = int(context.args[0].strip())
     if is_super_admin(target_uid):
         await update.message.reply_text(
-            f"⚠️ User `{target_uid}` is a *👑 Super Admin*. Remove them from `SUPER_ADMIN_IDS` in `.env` directly.",
+            f"⚠️ `{target_uid}` has full access (manage via `.env`).",
             parse_mode=ParseMode.MARKDOWN
         )
         return
 
     if target_uid not in ALLOWED_USER_IDS:
         await update.message.reply_text(
-            f"ℹ️ User `{target_uid}` is not in the Normal Admin list.",
+            f"ℹ️ `{target_uid}` is not in support admins.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -1454,7 +1405,7 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
         support_api_server.bridge.active_reply_sessions.pop(target_uid, None)
 
     await update.message.reply_text(
-        f"✅ User `{target_uid}` removed from Normal Admins and persisted to `.env`.",
+        f"✅ Removed `{target_uid}` from support admins.",
         parse_mode=ParseMode.MARKDOWN
     )
 
