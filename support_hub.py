@@ -230,10 +230,15 @@ class SupportVault:
                 updated_at TEXT NOT NULL
             )
             """)
-            # Auto-migrate existing DBs for member tracking
+            # Auto-migrate existing DBs for member tracking & Telegram metadata
             for col_sql in [
                 "ALTER TABLE cases ADD COLUMN member_email TEXT",
-                "ALTER TABLE cases ADD COLUMN member_uuid TEXT"
+                "ALTER TABLE cases ADD COLUMN member_uuid TEXT",
+                "ALTER TABLE cases ADD COLUMN telegram_message_id INTEGER",
+                "ALTER TABLE evidence_files ADD COLUMN telegram_file_id TEXT",
+                "ALTER TABLE evidence_files ADD COLUMN telegram_message_id INTEGER",
+                "ALTER TABLE evidence_files ADD COLUMN telegram_chat_id INTEGER",
+                "ALTER TABLE evidence_files ADD COLUMN telegram_file_unique_id TEXT",
             ]:
                 try:
                     conn.execute(col_sql)
@@ -243,6 +248,8 @@ class SupportVault:
             try:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_member_email ON cases(member_email)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_member_uuid ON cases(member_uuid)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_tg_msg ON cases(telegram_message_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence_files(case_code)")
                 conn.commit()
             except Exception:
                 pass
@@ -257,6 +264,10 @@ class SupportVault:
                 file_size INTEGER NOT NULL,
                 sha256_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                telegram_file_id TEXT,
+                telegram_message_id INTEGER,
+                telegram_chat_id INTEGER,
+                telegram_file_unique_id TEXT,
                 FOREIGN KEY (case_code) REFERENCES cases(case_code)
             )
             """)
@@ -394,7 +405,17 @@ class SupportVault:
             res.append(self.db_path)
         return res
 
-    def save_evidence(self, case_code: str, filename: str, data: bytes, mime_type: Optional[str] = None) -> Dict[str, Any]:
+    def save_evidence(
+        self,
+        case_code: str,
+        filename: str,
+        data: bytes,
+        mime_type: Optional[str] = None,
+        telegram_file_id: Optional[str] = None,
+        telegram_message_id: Optional[int] = None,
+        telegram_chat_id: Optional[int] = None,
+        telegram_file_unique_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         clean_data = sanitize_media(filename, data)
         sha256 = hashlib.sha256(clean_data).hexdigest()
         raw_name = os.path.basename(filename or "evidence")
@@ -410,28 +431,50 @@ class SupportVault:
             mime_type = "application/octet-stream"
 
         stored_name = f"{case_code}_{uuid.uuid4().hex[:8]}_{clean_name}"
-        stored_path = os.path.join(self.evidence_dir, stored_name)
+        stored_path = ""
 
-        with open(stored_path, "wb") as f:
-            f.write(clean_data)
-        try:
-            os.chmod(stored_path, 0o600)
-        except Exception:
-            pass
+        # Only write to local VPS disk if NOT stored directly in Telegram Storage Group
+        if not telegram_file_id:
+            stored_path = os.path.join(self.evidence_dir, stored_name)
+            with open(stored_path, "wb") as f:
+                f.write(clean_data)
+            try:
+                os.chmod(stored_path, 0o600)
+            except Exception:
+                pass
+        else:
+            stored_path = f"telegram://{telegram_chat_id}/{telegram_message_id}"
 
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         with self._get_conn() as conn:
             conn.execute(
                 """
                 INSERT INTO evidence_files (
-                    case_code, original_name, stored_filename, mime_type, file_size, sha256_hash, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    case_code, original_name, stored_filename, mime_type, file_size, sha256_hash, created_at,
+                    telegram_file_id, telegram_message_id, telegram_chat_id, telegram_file_unique_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (case_code, clean_name, stored_name, mime_type or "application/octet-stream", len(clean_data), sha256, now)
+                (
+                    case_code,
+                    clean_name,
+                    stored_name,
+                    mime_type or "application/octet-stream",
+                    len(clean_data),
+                    sha256,
+                    now,
+                    telegram_file_id,
+                    telegram_message_id,
+                    telegram_chat_id,
+                    telegram_file_unique_id
+                )
+            )
+            audit_dest = (
+                f"Telegram Storage Group [Chat: {telegram_chat_id}, Msg: {telegram_message_id}]"
+                if telegram_file_id else "Local VPS Vault"
             )
             conn.execute(
                 "INSERT INTO audit_logs (case_code, action, actor, details, timestamp) VALUES (?, ?, ?, ?, ?)",
-                (case_code, "EVIDENCE_UPLOADED", "reporter", f"File: {clean_name} ({len(clean_data)} bytes, SHA: {sha256[:12]})", now)
+                (case_code, "EVIDENCE_UPLOADED", "reporter", f"File: {clean_name} ({len(clean_data)} bytes, SHA: {sha256[:12]}) -> {audit_dest}", now)
             )
             conn.commit()
 
@@ -440,7 +483,11 @@ class SupportVault:
             "stored_filename": stored_name,
             "stored_path": stored_path,
             "file_size": len(clean_data),
-            "sha256": sha256
+            "sha256": sha256,
+            "telegram_file_id": telegram_file_id,
+            "telegram_message_id": telegram_message_id,
+            "telegram_chat_id": telegram_chat_id,
+            "telegram_file_unique_id": telegram_file_unique_id
         }
 
     def get_evidence_path(self, stored_filename: str) -> Optional[str]:
@@ -455,6 +502,19 @@ class SupportVault:
         for c in candidates:
             if os.path.exists(c) and os.path.isfile(c):
                 return c
+        return None
+
+    def get_case_by_telegram_message_id(self, message_id: int) -> Optional[Dict[str, Any]]:
+        """Resolve a case by its Telegram message ID across candidate DBs."""
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT case_code FROM cases WHERE telegram_message_id = ?", (message_id,)).fetchone()
+                    if row:
+                        return self.get_case(row["case_code"])
+            except Exception:
+                pass
         return None
 
     def get_case(self, case_code: str) -> Optional[Dict[str, Any]]:
@@ -577,10 +637,16 @@ class SupportBotBridge:
         admin_chat_id: int,
         allowed_user_ids: Optional[Set[int]] = None,
         auth_callback: Optional[Callable[[int], bool]] = None,
+        ops_group_chat_id: Optional[int] = None,
+        storage_chat_id: Optional[int] = None,
     ):
         self.app = application
         self.vault = vault
         self.admin_chat_id = admin_chat_id
+        # Group 1: Collaborative Operations Group
+        self.ops_group_chat_id = ops_group_chat_id or admin_chat_id
+        # Group 2: Dedicated Evidence Storage Group / Channel
+        self.storage_chat_id = storage_chat_id
         self.auth_callback = auth_callback
         if allowed_user_ids is not None:
             self.allowed_user_ids: Set[int] = set(allowed_user_ids)
@@ -595,6 +661,76 @@ class SupportBotBridge:
         self.msg_to_case: Dict[int, str] = {}
         if self.app and HAS_TELEGRAM:
             self._register_handlers()
+
+    async def store_evidence(
+        self,
+        case_code: str,
+        filename: str,
+        data: bytes,
+        mime_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Upload evidence directly to the dedicated Telegram Storage Group (Group 2) with zero VPS disk retention."""
+        clean_data = sanitize_media(filename, data)
+        raw_name = os.path.basename(filename or "evidence")
+        clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', raw_name)[:120]
+        if not clean_name or clean_name.startswith('.'):
+            clean_name = f"evidence_{clean_name}"
+
+        root_name, ext = os.path.splitext(clean_name)
+        if not ext or ext.lower() not in self.vault.ALLOWED_EVIDENCE_EXTS:
+            ext_label = ext.lstrip('.') or 'bin'
+            clean_name = f"{root_name[:96]}_{ext_label}.blocked"
+            mime_type = "application/octet-stream"
+
+        sha256 = hashlib.sha256(clean_data).hexdigest()
+        tg_file_id = None
+        tg_msg_id = None
+        tg_chat_id = None
+        tg_unique_id = None
+
+        if self.app and self.storage_chat_id and HAS_TELEGRAM:
+            try:
+                import io
+                bio = io.BytesIO(clean_data)
+                bio.name = clean_name
+                now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                caption = (
+                    f"📦 <b>EVIDENCE VAULT RECORD</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"Case: <code>#{html.escape(case_code)}</code>\n"
+                    f"File: <code>{html.escape(clean_name)}</code>\n"
+                    f"Size: {len(clean_data):,} bytes\n"
+                    f"SHA-256: <code>{sha256}</code>\n"
+                    f"Archived: {now_str}"
+                )
+                sent_msg = await self.app.bot.send_document(
+                    chat_id=self.storage_chat_id,
+                    document=bio,
+                    filename=clean_name,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML
+                )
+                if sent_msg and sent_msg.document:
+                    tg_file_id = sent_msg.document.file_id
+                    tg_unique_id = sent_msg.document.file_unique_id
+                    tg_msg_id = sent_msg.message_id
+                    tg_chat_id = sent_msg.chat.id
+                    logger.info("Uploaded evidence %s for case %s to Telegram Storage Group %s (msg: %s)", clean_name, case_code, tg_chat_id, tg_msg_id)
+            except Exception as e:
+                logger.error("Failed to upload evidence to Telegram Storage Group: %s. Falling back to local storage.", e)
+
+        # Record in vault (if tg_file_id is set, save_evidence skips writing bytes to VPS disk)
+        saved = self.vault.save_evidence(
+            case_code=case_code,
+            filename=clean_name,
+            data=clean_data,
+            mime_type=mime_type,
+            telegram_file_id=tg_file_id,
+            telegram_message_id=tg_msg_id,
+            telegram_chat_id=tg_chat_id,
+            telegram_file_unique_id=tg_unique_id
+        )
+        return saved
 
     def _is_authorized_user(self, user_id: Optional[int]) -> bool:
         """Fail-closed authorization check on all SupportBotBridge handlers (CRIT-01)."""
@@ -763,8 +899,9 @@ class SupportBotBridge:
         return text, kb
 
     async def notify_new_case(self, case_data: Dict[str, Any]):
-        """Send streamlined alert to the administrator."""
-        if not self.app or not self.admin_chat_id:
+        """Send streamlined alert to the collaborative operations group (Group 1)."""
+        target_chat = self.ops_group_chat_id or self.admin_chat_id
+        if not self.app or not target_chat:
             logger.info("Standalone/No-admin mode: skipping Telegram case alert for %s", case_data.get("case_code"))
             return
 
@@ -773,7 +910,7 @@ class SupportBotBridge:
         kb = self.make_case_keyboard(case_data["case_code"], case_data["status"], has_files=has_files, msg_count=0)
         try:
             msg = await self.app.bot.send_message(
-                chat_id=self.admin_chat_id,
+                chat_id=target_chat,
                 text=text,
                 parse_mode=ParseMode.HTML,
                 reply_markup=kb
@@ -781,11 +918,12 @@ class SupportBotBridge:
             self.vault.set_telegram_message_id(case_data["case_code"], msg.message_id)
             self.msg_to_case[msg.message_id] = case_data["case_code"]
         except Exception as e:
-            logger.error("Failed to dispatch Telegram case notification: %s", e)
+            logger.error("Failed to dispatch Telegram case notification to %s: %s", target_chat, e)
 
     async def notify_reporter_reply(self, case_code: str, message_text: str):
-        """Notify admin when reporter sends a message on the web portal."""
-        if not self.app or not self.admin_chat_id:
+        """Notify collaborative operations group when reporter sends a message on the web portal."""
+        target_chat = self.ops_group_chat_id or self.admin_chat_id
+        if not self.app or not target_chat:
             logger.info("Standalone/No-admin mode: skipping Telegram reporter reply alert for %s", case_code)
             return
 
@@ -795,7 +933,7 @@ class SupportBotBridge:
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"<blockquote>{html.escape(message_text)}</blockquote>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"<i>Reply directly to this notification, or tap below:</i>"
+            f"<i>Reply directly to this notification in the group, or tap below:</i>"
         )
         kb = InlineKeyboardMarkup([
             [
@@ -808,7 +946,7 @@ class SupportBotBridge:
         ])
         try:
             msg = await self.app.bot.send_message(
-                chat_id=self.admin_chat_id,
+                chat_id=target_chat,
                 text=text,
                 parse_mode=ParseMode.HTML,
                 reply_markup=kb
@@ -965,17 +1103,33 @@ class SupportBotBridge:
 
                 sent_count = 0
                 for f in files:
+                    clean_fname = html.escape(str(f.get("original_name") or "evidence.bin"))
+                    sha = html.escape(str(f.get("sha256_hash") or "")[:16])
+                    size_kb = (f.get("file_size") or 0) // 1024
+                    caption = (
+                        f"📁 <b>{clean_fname}</b>\n"
+                        f"Size: {size_kb} KB\n"
+                        f"SHA-256: <code>{sha}</code>"
+                    )
+
+                    # 1. First priority: Direct instant delivery from Telegram Storage Vault
+                    tg_fid = f.get("telegram_file_id")
+                    if tg_fid:
+                        try:
+                            await query.message.reply_document(
+                                document=tg_fid,
+                                caption=caption + "\n<i>(Retrieved from Telegram Storage Group)</i>",
+                                parse_mode=ParseMode.HTML
+                            )
+                            sent_count += 1
+                            continue
+                        except Exception as e:
+                            logger.warning("Could not forward evidence via telegram_file_id %s: %s", tg_fid, e)
+
+                    # 2. Second priority: Fallback to local disk file if present
                     stored_name = f.get("stored_filename", "")
                     stored_path = self.vault.get_evidence_path(stored_name)
                     if stored_path and os.path.exists(stored_path):
-                        clean_fname = html.escape(str(f.get("original_name") or "evidence.bin"))
-                        sha = html.escape(str(f.get("sha256_hash") or "")[:16])
-                        size_kb = (f.get("file_size") or 0) // 1024
-                        caption = (
-                            f"📁 <b>{clean_fname}</b>\n"
-                            f"Size: {size_kb} KB\n"
-                            f"SHA-256: <code>{sha}</code>"
-                        )
                         with open(stored_path, "rb") as fp:
                             file_data = fp.read()
                         await query.message.reply_document(
@@ -988,7 +1142,7 @@ class SupportBotBridge:
                     else:
                         missing_name = html.escape(str(f.get("original_name") or stored_name or "Unknown"))
                         await query.message.reply_text(
-                            f"⚠️ Evidence file <code>{missing_name}</code> missing from disk storage.",
+                            f"⚠️ Evidence file <code>{missing_name}</code> could not be retrieved.",
                             parse_mode=ParseMode.HTML
                         )
 
@@ -1039,9 +1193,14 @@ class SupportBotBridge:
         if user_id in self.active_reply_sessions:
             case_code = self.active_reply_sessions.get(user_id)
 
-        # Check 2: Did user reply directly to a bot message representing a case?
-        elif reply_to and reply_to.message_id in self.msg_to_case:
-            case_code = self.msg_to_case[reply_to.message_id]
+        # Check 2: Did user reply directly to a bot message representing a case (group chat support)?
+        elif reply_to and reply_to.message_id:
+            case_code = self.msg_to_case.get(reply_to.message_id)
+            if not case_code:
+                case_row = self.vault.get_case_by_telegram_message_id(reply_to.message_id)
+                if case_row:
+                    case_code = case_row["case_code"]
+                    self.msg_to_case[reply_to.message_id] = case_code
 
         if not case_code:
             return  # Not a support reply message, pass through to other bot handlers
@@ -1055,29 +1214,29 @@ class SupportBotBridge:
         admin_name = update.effective_user.first_name or "Investigator"
         delivered_parts = []
 
-        # Download and store photo if present
+        # Download and store photo if present (directly to Telegram Storage Group)
         if update.message.photo:
             try:
                 photo = update.message.photo[-1]
                 p_file = await photo.get_file()
                 p_bytes = await p_file.download_as_bytearray()
                 p_name = f"admin_photo_{int(time.time())}.jpg"
-                self.vault.save_evidence(case_code, p_name, bytes(p_bytes), "image/jpeg")
+                await self.store_evidence(case_code, p_name, bytes(p_bytes), "image/jpeg")
                 delivered_parts.append(f"📁 [{p_name}]")
             except Exception as e:
-                logger.error("Failed to download admin photo: %s", e)
+                logger.error("Failed to store admin photo: %s", e)
 
-        # Download and store document if present
+        # Download and store document if present (directly to Telegram Storage Group)
         if update.message.document:
             try:
                 doc = update.message.document
                 d_file = await doc.get_file()
                 d_bytes = await d_file.download_as_bytearray()
                 d_name = doc.file_name or f"admin_file_{int(time.time())}"
-                self.vault.save_evidence(case_code, d_name, bytes(d_bytes), doc.mime_type or "application/octet-stream")
+                await self.store_evidence(case_code, d_name, bytes(d_bytes), doc.mime_type or "application/octet-stream")
                 delivered_parts.append(f"📁 [{d_name}]")
             except Exception as e:
-                logger.error("Failed to download admin document: %s", e)
+                logger.error("Failed to store admin document: %s", e)
 
         msg_body = (update.message.text or update.message.caption or "").strip()
         if msg_body:
@@ -1095,9 +1254,9 @@ class SupportBotBridge:
         )
 
         await update.message.reply_text(
-            f"✓ <b>Message delivered to reporter for #{html.escape(case_code)}</b>\n"
+            f"✓ <b>Message delivered to reporter for #{html.escape(case_code)} by {html.escape(admin_name)}</b>\n"
             f"<blockquote>{html.escape(final_text)}</blockquote>\n"
-            f"<i>(Active reply mode. Type more to reply, or send /cancel to end.)</i>",
+            f"<i>(Active collaborative reply mode. Type more to reply, or send /cancel to end.)</i>",
             parse_mode=ParseMode.HTML
         )
 
@@ -1766,10 +1925,10 @@ class SupportApiServer:
                 )
                 case_code = case_res["case_code"]
 
-                # Save sanitized evidence files
+                # Save sanitized evidence files (uploaded directly to Telegram Storage Group with zero VPS disk retention)
                 saved_files = []
                 for ef in evidence_files:
-                    saved = self.vault.save_evidence(case_code, ef["filename"], ef["data"], ef.get("mime"))
+                    saved = await self.bridge.store_evidence(case_code, ef["filename"], ef["data"], ef.get("mime"))
                     ef["data"] = b""
                     saved_files.append(saved)
                 evidence_files.clear()
@@ -1951,7 +2110,7 @@ class SupportApiServer:
                     if len(existing_files) >= self.MAX_FILES_PER_CASE:
                         await self._send_response(writer, 429, {"error": f"Maximum attachment limit ({self.MAX_FILES_PER_CASE} files) reached for this case."}, req_origin=req_origin)
                         return
-                    saved_ev = self.vault.save_evidence(case_code, attached_file["filename"], attached_file["data"], attached_file.get("mime"))
+                    saved_ev = await self.bridge.store_evidence(case_code, attached_file["filename"], attached_file["data"], attached_file.get("mime"))
                     attached_file["data"] = b""
                     safe_disp_name = saved_ev.get("original_name") or "attachment"
                     text = f"📁 [{safe_disp_name}]\n{text}" if text else f"📁 [{safe_disp_name}]"
@@ -2053,6 +2212,8 @@ def init_support_hub(
     host: str = "127.0.0.1",
     allowed_user_ids: Optional[Set[int]] = None,
     auth_callback: Optional[Callable[[int], bool]] = None,
+    ops_group_chat_id: Optional[int] = None,
+    storage_chat_id: Optional[int] = None,
 ) -> SupportApiServer:
     """Initialize the Vault, Bot Bridge, and HTTP Server on the bot's asyncio loop."""
     vault = SupportVault(ghost_dir=ghost_dir)
@@ -2062,6 +2223,8 @@ def init_support_hub(
         admin_chat_id=admin_chat_id,
         allowed_user_ids=allowed_user_ids,
         auth_callback=auth_callback,
+        ops_group_chat_id=ops_group_chat_id,
+        storage_chat_id=storage_chat_id,
     )
     server = SupportApiServer(vault=vault, bridge=bridge, host=host, port=port)
     return server

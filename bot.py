@@ -130,6 +130,10 @@ ALLOWED_USER_IDS = [
 GHOST_DIR = os.getenv("GHOST_DIR", "/var/www/ghost")
 BACKUPS_DIR = os.getenv("BACKUPS_DIR", os.path.join(GHOST_DIR, "backups"))
 ADMIN_CHAT_ID = _parse_int(os.getenv("ADMIN_CHAT_ID"), ALLOWED_USER_IDS[0] if ALLOWED_USER_IDS else 0)
+OPS_GROUP_CHAT_ID = _parse_int(os.getenv("OPS_GROUP_CHAT_ID"), None)
+STORAGE_CHAT_ID = _parse_int(os.getenv("STORAGE_CHAT_ID"), None)
+# Effective ops destination: Group 1 if configured, otherwise fallback to ADMIN_CHAT_ID
+EFFECTIVE_OPS_CHAT_ID = OPS_GROUP_CHAT_ID if OPS_GROUP_CHAT_ID is not None else ADMIN_CHAT_ID
 SUPPORT_PORT = _parse_int(os.getenv("SUPPORT_PORT"), 8080)
 SUPPORT_HOST = os.getenv("SUPPORT_HOST", "127.0.0.1")
 
@@ -280,14 +284,22 @@ async def send_unauthorized(update: Update):
         f"⛔ *Access Denied*\n\n"
         f"Your Telegram User ID is `{uid}`.\n\n"
         f"This bot enforces fail-closed authorization for security. To authorize your account, add your ID to `.env`:\n"
-        f"`ALLOWED_USER_IDS={uid}`\n"
-        f"`ADMIN_CHAT_ID={uid}`\n\n"
+        f"`ALLOWED_USER_IDS=...,{uid}`\n\n"
         f"Then restart the service:\n"
         f"`sudo systemctl restart ghost-telegram-bot`"
     )
     if update.callback_query:
-        await update.callback_query.answer("⛔ Access Denied", show_alert=True)
-        await update.callback_query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+        chat = update.effective_chat
+        is_group = bool(chat and getattr(chat, "type", "") in ("group", "supergroup", "channel"))
+        try:
+            await update.callback_query.answer(f"⛔ Access Denied. Your User ID is {uid}", show_alert=True)
+        except Exception:
+            pass
+        if not is_group:
+            try:
+                await update.callback_query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                pass
     elif update.message:
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -993,7 +1005,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bridge = support_api_server.bridge
         user_id = user.id
         reply_to = update.message.reply_to_message
-        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        reply_msg_id = reply_to.message_id if reply_to else None
+        is_case_session = (
+            (user_id in bridge.active_reply_sessions)
+            or (reply_msg_id and (reply_msg_id in bridge.msg_to_case or bridge.vault.get_case_by_telegram_message_id(reply_msg_id) is not None))
+        )
         if is_case_session:
             await bridge.handle_admin_message(update, context)
             return
@@ -1090,7 +1106,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bridge = support_api_server.bridge
         user_id = user.id
         reply_to = update.message.reply_to_message
-        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        reply_msg_id = reply_to.message_id if reply_to else None
+        is_case_session = (
+            (user_id in bridge.active_reply_sessions)
+            or (reply_msg_id and (reply_msg_id in bridge.msg_to_case or bridge.vault.get_case_by_telegram_message_id(reply_msg_id) is not None))
+        )
         if is_case_session:
             await bridge.handle_admin_message(update, context)
             return
@@ -1106,7 +1126,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bridge = support_api_server.bridge
         user_id = user.id
         reply_to = update.message.reply_to_message
-        is_case_session = (user_id in bridge.active_reply_sessions) or (reply_to and reply_to.message_id in bridge.msg_to_case)
+        reply_msg_id = reply_to.message_id if reply_to else None
+        is_case_session = (
+            (user_id in bridge.active_reply_sessions)
+            or (reply_msg_id and (reply_msg_id in bridge.msg_to_case or bridge.vault.get_case_by_telegram_message_id(reply_msg_id) is not None))
+        )
         if is_case_session:
             await bridge.handle_admin_message(update, context)
             return
@@ -1132,6 +1156,55 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if support_api_server and support_api_server.bridge:
         await support_api_server.bridge.cancel_command(update, context)
+
+
+async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Report Telegram ID diagnostics for users and groups/channels."""
+    user = update.effective_user
+    chat = update.effective_chat
+    uid = user.id if user else "Unknown"
+    cid = chat.id if chat else "Unknown"
+    ctype = getattr(chat, "type", "Unknown") if chat else "Unknown"
+    auth_status = "✅ Authorized" if (user and is_authorized(user.id)) else "❌ Unauthorized"
+
+    text = (
+        f"🆔 *Telegram Diagnostics*\n\n"
+        f"👤 *Your User ID:* `{uid}`\n"
+        f"💬 *Current Chat ID:* `{cid}`\n"
+        f"🏷️ *Chat Type:* `{ctype}`\n"
+        f"🛡️ *Admin Access:* {auth_status}\n\n"
+        f"• For Group 1 (Ops), set: `OPS_GROUP_CHAT_ID={cid}`\n"
+        f"• For Group 2 (Storage), set: `STORAGE_CHAT_ID={cid}`\n"
+        f"• For Admin List, set: `ALLOWED_USER_IDS=...,{uid}`"
+    )
+    if update.message:
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+async def admins_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Display authorized admins and group routing configurations."""
+    user = update.effective_user
+    if not user or not is_authorized(user.id):
+        await send_unauthorized(update)
+        return
+
+    admins = sorted(list(_effective_allowed_user_ids()))
+    admin_lines = "\n".join([f"• `{uid}`" for uid in admins]) if admins else "• _None configured_"
+    ops_display = f"`{EFFECTIVE_OPS_CHAT_ID}`" if EFFECTIVE_OPS_CHAT_ID else "_Not set (direct alerts disabled)_"
+    storage_display = f"`{STORAGE_CHAT_ID}`" if STORAGE_CHAT_ID else "_Not set (falling back to local vault)_"
+
+    text = (
+        f"🛡️ *Authorized Admin Team & Routing*\n\n"
+        f"👥 *Authorized Admin Users ({len(admins)}):*\n"
+        f"{admin_lines}\n\n"
+        f"💬 *Group 1 (Collaborative Ops):*\n"
+        f"Chat ID: {ops_display}\n\n"
+        f"📦 *Group 2 (Evidence Storage Vault):*\n"
+        f"Chat ID: {storage_display}\n\n"
+        f"💡 _To add or remove admins, update `ALLOWED_USER_IDS` in `.env`._"
+    )
+    if update.message:
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
 def _is_forbidden_ip(ip_str: str) -> bool:
@@ -1560,6 +1633,8 @@ async def post_init(application: Application):
             host=SUPPORT_HOST,
             allowed_user_ids=_effective_allowed_user_ids(),
             auth_callback=is_authorized,
+            ops_group_chat_id=EFFECTIVE_OPS_CHAT_ID,
+            storage_chat_id=STORAGE_CHAT_ID,
         )
         await support_api_server.start()
         logger.info(f"Support REST API daemon listening on http://{SUPPORT_HOST}:{SUPPORT_PORT}")
@@ -1608,6 +1683,8 @@ def main():
             host=SUPPORT_HOST,
             allowed_user_ids=_effective_allowed_user_ids(),
             auth_callback=is_authorized,
+            ops_group_chat_id=EFFECTIVE_OPS_CHAT_ID,
+            storage_chat_id=STORAGE_CHAT_ID,
         )
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -1627,6 +1704,8 @@ def main():
     print(f"Backups Directory:   {BACKUPS_DIR}")
     print(f"Authorized User IDs: {_effective_allowed_user_ids() or 'None Configured (Locked / Fail-Closed)'}")
     print(f"Admin Alert Chat ID: {ADMIN_CHAT_ID or 'Not Set'}")
+    print(f"Ops Group Chat ID:   {EFFECTIVE_OPS_CHAT_ID or 'Not Set'}")
+    print(f"Storage Chat ID:     {STORAGE_CHAT_ID or 'Not Set (Local Storage Fallback)'}")
     print(f"Support REST API:    http://{SUPPORT_HOST}:{SUPPORT_PORT}")
     if _loaded_env_files:
         print(f"Loaded Configs:      {', '.join(_loaded_env_files)}")
@@ -1654,6 +1733,8 @@ def main():
 
     # Handlers
     app.add_handler(CommandHandler(["start", "menu"], start_command))
+    app.add_handler(CommandHandler(["id", "myid"], id_command))
+    app.add_handler(CommandHandler("admins", admins_command))
     app.add_handler(CommandHandler(["github_setup", "gh_setup"], github_setup_command))
     app.add_handler(CommandHandler(["github_backup", "gh_backup"], github_backup_command))
     app.add_handler(CommandHandler(["github_restore", "gh_restore"], github_restore_command))
@@ -1683,6 +1764,8 @@ def main():
             host=SUPPORT_HOST,
             allowed_user_ids=_effective_allowed_user_ids(),
             auth_callback=is_authorized,
+            ops_group_chat_id=EFFECTIVE_OPS_CHAT_ID,
+            storage_chat_id=STORAGE_CHAT_ID,
         )
         try:
             loop.run_until_complete(fallback_server.start())
