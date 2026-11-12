@@ -1273,18 +1273,25 @@ class SupportBotBridge:
             return
 
         lines = ["📋 <b>Recent Support & Evidence Cases:</b>\n"]
+        buttons = []
         for c in cases:
-            cc = html.escape(str(c.get('case_code') or 'UNKNOWN'))
+            cc_raw = str(c.get('case_code') or 'UNKNOWN')
+            cs_raw = str(c.get('status') or 'SUBMITTED').upper()
+            st_icon = "🟡" if cs_raw == "SUBMITTED" else ("🟠" if cs_raw == "IN_REVIEW" else "🟢")
+            cc = html.escape(cc_raw)
             cp = html.escape(str(c.get('priority') or 'STANDARD'))
             cg = html.escape(str(c.get('category') or 'General'))
-            cs = html.escape(str(c.get('status') or 'SUBMITTED'))
-            sub = html.escape(str(c.get('subject') or 'No Subject')[:30])
+            cs = html.escape(cs_raw)
+            sub_raw = str(c.get('subject') or 'No Subject')
+            sub = html.escape(sub_raw[:30])
             lines.append(
                 f"• <b>#{cc}</b> [{cp}] - {cg}\n"
                 f"   Status: <b>{cs}</b> | Subject: {sub}...\n"
             )
-        lines.append("<i>Use inline cards above or /reply to interact.</i>")
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+            buttons.append([InlineKeyboardButton(f"{st_icon} #{cc_raw} - {sub_raw[:22]}", callback_data=f"case_view:{cc_raw}")])
+        lines.append("<i>Tap a case button below to open its full card, evidence, and reply thread.</i>")
+        kb = InlineKeyboardMarkup(buttons) if HAS_TELEGRAM and buttons else None
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=kb)
 
     async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         caller_id = update.effective_user.id if update.effective_user else None

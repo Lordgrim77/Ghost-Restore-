@@ -148,7 +148,8 @@ echo -e "Writing configuration to $INSTALL_DIR/.env..."
   umask 077
   {
     printf 'TELEGRAM_BOT_TOKEN=%s\n' "$BOT_TOKEN"
-    printf 'ALLOWED_USER_IDS=%s\n' "$ADMIN_ID"
+    printf 'SUPER_ADMIN_IDS=%s\n' "$ADMIN_ID"
+    printf 'ALLOWED_USER_IDS=\n'
     printf 'ADMIN_CHAT_ID=%s\n' "$ADMIN_ID"
     printf 'GHOST_DIR=%s\n' "$GHOST_DIR"
     printf 'BACKUPS_DIR=%s/backups\n' "$GHOST_DIR"
