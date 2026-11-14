@@ -552,30 +552,67 @@ if os.path.isfile(config_path):
         )
         subprocess.run(mysql_cmd, input=sql_updates, text=True, capture_output=True, env=mysql_env)
 
-        res = subprocess.run(
-            mysql_cmd + ["-Nse", "SELECT value FROM settings WHERE `key`='navigation'"],
-            capture_output=True, text=True, env=mysql_env
-        )
-        if res.stdout.strip():
-            nav = json.loads(res.stdout.strip())
-            urls = [item.get("url") for item in nav]
-            changed = False
-            if "/team/" not in urls and "/team" not in urls:
-                nav.append({"label": "Our Team", "url": "/team/"})
-                changed = True
-            if "/support/" not in urls and "/support" not in urls:
-                nav.append({"label": "Support", "url": "/support/"})
-                changed = True
-            if changed:
-                new_nav_sql = f"UPDATE settings SET value = {sql_quote(json.dumps(nav))} WHERE `key` = 'navigation';\n"
-                subprocess.run(mysql_cmd, input=new_nav_sql, text=True, capture_output=True, env=mysql_env)
+        for nav_key in ("navigation", "secondary_navigation"):
+            res = subprocess.run(
+                mysql_cmd + ["-Nse", f"SELECT value FROM settings WHERE `key`='{nav_key}'"],
+                capture_output=True, text=True, env=mysql_env
+            )
+            if res.stdout.strip():
+                try:
+                    nav = json.loads(res.stdout.strip())
+                except Exception:
+                    nav = []
+                if isinstance(nav, list):
+                    changed = False
+                    updated_nav = []
+                    seen_report = False
+                    report_labels = {"contact", "contact us", "contact & support", "support", "report"}
+                    report_paths = {"/contact", "/support", "/report"}
+                    for item in nav:
+                        if not isinstance(item, dict):
+                            updated_nav.append(item)
+                            continue
+                        lbl = str(item.get("label", "")).strip()
+                        raw_url = str(item.get("url", "")).strip()
+                        norm_path = raw_url.rstrip("/") or "/"
+                        if norm_path in report_paths or lbl.lower() in report_labels:
+                            if not seen_report:
+                                if lbl != "Report" or raw_url != "/report/":
+                                    changed = True
+                                updated_nav.append({"label": "Report", "url": "/report/"})
+                                seen_report = True
+                            else:
+                                changed = True
+                        else:
+                            updated_nav.append(item)
+
+                    if nav_key == "navigation":
+                        urls = [str(i.get("url", "")).rstrip("/") for i in updated_nav if isinstance(i, dict)]
+                        if "/team" not in urls:
+                            updated_nav.append({"label": "Our Team", "url": "/team/"})
+                            changed = True
+                        if not seen_report and "/report" not in urls:
+                            updated_nav.append({"label": "Report", "url": "/report/"})
+                            changed = True
+
+                    if changed:
+                        new_nav_sql = f"UPDATE settings SET value = {sql_quote(json.dumps(updated_nav))} WHERE `key` = '{nav_key}';\n"
+                        subprocess.run(mysql_cmd, input=new_nav_sql, text=True, capture_output=True, env=mysql_env)
 
         page_sql = """
         INSERT IGNORE INTO posts (
             id, uuid, title, slug, lexical, html, plaintext, comment_id, featured, type, status, visibility, email_recipient_filter, created_at, updated_at, published_at, published_by, show_title_and_feature_image
         ) SELECT
-            '6ae71fbd6a4691255cb0ca98', UUID(), 'Support & Incident Intake', 'support', lexical, html, plaintext, '6ae71fbd6a4691255cb0ca98', 0, 'page', 'published', 'public', 'all', NOW(), NOW(), NOW(), published_by, 1
+            '6ae71fbd6a4691255cb0ca99', UUID(), 'Report', 'report', lexical, html, plaintext, '6ae71fbd6a4691255cb0ca99', 0, 'page', 'published', 'public', 'all', NOW(), NOW(), NOW(), published_by, 1
         FROM posts WHERE slug = 'about' LIMIT 1;
+
+        INSERT IGNORE INTO posts (
+            id, uuid, title, slug, lexical, html, plaintext, comment_id, featured, type, status, visibility, email_recipient_filter, created_at, updated_at, published_at, published_by, show_title_and_feature_image
+        ) SELECT
+            '6ae71fbd6a4691255cb0ca98', UUID(), 'Report', 'support', lexical, html, plaintext, '6ae71fbd6a4691255cb0ca98', 0, 'page', 'published', 'public', 'all', NOW(), NOW(), NOW(), published_by, 1
+        FROM posts WHERE slug = 'about' LIMIT 1;
+
+        UPDATE posts SET title = 'Report' WHERE slug = 'support' AND type = 'page';
 
         INSERT IGNORE INTO posts (
             id, uuid, title, slug, lexical, html, plaintext, comment_id, featured, type, status, visibility, email_recipient_filter, created_at, updated_at, published_at, published_by, show_title_and_feature_image
@@ -962,7 +999,7 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}  🎉 Theme & Support Portal Setup Finished Successfully!          ${NC}"
 echo -e "${GREEN}==================================================================${NC}"
 echo -e "✓ Alto Theme installed cleanly in:     ${CYAN}$THEME_DIR${NC}"
-echo -e "✓ Support Portal active at:            ${CYAN}https://yourdomain.com/support/${NC}"
+echo -e "✓ Report Portal active at:             ${CYAN}https://yourdomain.com/report/${NC}"
 echo -e "✓ Team Showcase active at:             ${CYAN}https://yourdomain.com/team/${NC}"
 echo -e "✓ Verification Challenge Engine:       ${GREEN}ACTIVE & VERIFIED (port 8080)${NC}"
 echo -e "✓ Email Templates updated in:          ${CYAN}$GHOST_DIR/current/core/${NC}"

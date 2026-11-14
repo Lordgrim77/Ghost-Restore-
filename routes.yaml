@@ -5,6 +5,8 @@ routes:
     template: posts
   /contact/:
     template: page-contact
+  /report/:
+    template: page-support
   /support/:
     template: page-support
   /team/:
