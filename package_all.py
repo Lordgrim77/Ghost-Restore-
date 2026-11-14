@@ -98,6 +98,18 @@ def sync_repo_theme_files_to_theme_src():
             os.path.join("assets", "built", "team-page.js"),
             os.path.join("assets", "js", "team-page.js"),
         ],
+        "about-page.css": [
+            os.path.join("assets", "built", "about-page.css"),
+        ],
+        "team-page.css": [
+            os.path.join("assets", "built", "team-page.css"),
+        ],
+        "support-portal.css": [
+            os.path.join("assets", "built", "support-portal.css"),
+        ],
+        "support-portal.js": [
+            os.path.join("assets", "built", "support-portal.js"),
+        ],
     }
     synced = 0
     for repo_rel, theme_rels in theme_sync_map.items():

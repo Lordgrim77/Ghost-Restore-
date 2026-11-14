@@ -33,7 +33,8 @@
       padding: 0 !important;
       width: 100% !important;
       height: 100% !important;
-      overflow-x: hidden !important;
+      overflow-x: clip !important;
+      overflow-y: visible !important;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif !important;
       -webkit-font-smoothing: antialiased !important;
     }
@@ -42,8 +43,9 @@
     .gh-portal-popup-background {
       position: fixed !important;
       inset: 0 !important;
-      width: 100vw !important;
+      width: 100% !important;
       height: 100vh !important;
+      height: 100dvh !important;
       background: radial-gradient(circle at 50% 40%, rgba(10, 15, 24, 0.72) 0%, rgba(3, 5, 8, 0.88) 100%) !important;
       backdrop-filter: blur(28px) saturate(190%) !important;
       -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
@@ -55,8 +57,9 @@
     .gh-portal-popup-wrapper {
       position: fixed !important;
       inset: 0 !important;
-      width: 100vw !important;
+      width: 100% !important;
       height: 100vh !important;
+      height: 100dvh !important;
       display: flex !important;
       align-items: flex-start !important;
       justify-content: center !important;
@@ -65,6 +68,7 @@
       box-sizing: border-box !important;
       z-index: 20 !important;
       overflow-y: auto !important;
+      overscroll-behavior: contain !important;
       -webkit-overflow-scrolling: touch !important;
     }
 
@@ -1306,7 +1310,8 @@
       padding: 0 !important;
       width: 100% !important;
       height: 100% !important;
-      overflow-x: hidden !important;
+      overflow-x: clip !important;
+      overflow-y: visible !important;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif !important;
     }
 
@@ -1314,8 +1319,9 @@
     .gh-portal-popup-background {
       position: fixed !important;
       inset: 0 !important;
-      width: 100vw !important;
+      width: 100% !important;
       height: 100vh !important;
+      height: 100dvh !important;
       background: radial-gradient(circle at 50% 40%, rgba(241, 245, 249, 0.72) 0%, rgba(15, 23, 42, 0.45) 100%) !important;
       backdrop-filter: blur(24px) saturate(180%) !important;
       -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
@@ -1326,8 +1332,9 @@
     .gh-portal-popup-wrapper {
       position: fixed !important;
       inset: 0 !important;
-      width: 100vw !important;
+      width: 100% !important;
       height: 100vh !important;
+      height: 100dvh !important;
       display: flex !important;
       align-items: flex-start !important;
       justify-content: center !important;
@@ -1336,6 +1343,7 @@
       box-sizing: border-box !important;
       z-index: 20 !important;
       overflow-y: auto !important;
+      overscroll-behavior: contain !important;
       -webkit-overflow-scrolling: touch !important;
     }
 

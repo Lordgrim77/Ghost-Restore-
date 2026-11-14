@@ -1915,6 +1915,9 @@ class SupportApiServer:
                     "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key",
                     "Access-Control-Max-Age: 86400",
                     "X-Content-Type-Options: nosniff",
+                    "Cross-Origin-Opener-Policy: same-origin",
+                    "Cross-Origin-Resource-Policy: same-origin",
+                    "X-Permitted-Cross-Domain-Policies: none",
                     "Content-Length: 0",
                     "Connection: close",
                 ]
@@ -1971,20 +1974,52 @@ class SupportApiServer:
                 if self._check_rate_limit("csp_report", client_ip, max_hits=60, window_sec=60):
                     await self._send_response(writer, 429, {"error": "Too many reports."}, req_origin=req_origin)
                     return
+                if len(body) > 65536:
+                    await self._send_response(writer, 413, {"error": "Report payload too large."}, req_origin=req_origin)
+                    return
                 try:
-                    report_obj = json.loads(body.decode("utf-8", errors="ignore") or "{}")
-                    violations_log = os.path.join(self.vault.vault_dir, "csp_violations.log")
-                    log_entry = {
-                        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        "ip_hash": ip_hash,
-                        "report": report_obj
-                    }
-                    with open(violations_log, "a", encoding="utf-8") as vf:
-                        vf.write(json.dumps(log_entry) + "\n")
-                    try:
-                        os.chmod(violations_log, 0o600)
-                    except OSError:
-                        pass
+                    raw_payload = json.loads(body.decode("utf-8", errors="ignore") or "{}")
+                    reports: List[Dict[str, Any]] = []
+                    if isinstance(raw_payload, list):
+                        for item in raw_payload[:20]:
+                            if isinstance(item, dict):
+                                inner = item.get("body") if isinstance(item.get("body"), dict) else item
+                                reports.append({
+                                    "format": "reports+json",
+                                    "type": str(item.get("type", ""))[:64],
+                                    "url": str(item.get("url", ""))[:512],
+                                    "document_uri": str(inner.get("documentURL") or inner.get("document-uri") or "")[:512],
+                                    "blocked_uri": str(inner.get("blockedURL") or inner.get("blocked-uri") or "")[:512],
+                                    "directive": str(inner.get("effectiveDirective") or inner.get("violated-directive") or "")[:128],
+                                    "disposition": str(inner.get("disposition", ""))[:32],
+                                    "source_file": str(inner.get("sourceFile") or inner.get("source-file") or "")[:512],
+                                    "line": inner.get("lineNumber") or inner.get("line-number"),
+                                })
+                    elif isinstance(raw_payload, dict):
+                        inner = raw_payload.get("csp-report") if isinstance(raw_payload.get("csp-report"), dict) else raw_payload
+                        reports.append({
+                            "format": "csp-report" if "csp-report" in raw_payload else "json",
+                            "document_uri": str(inner.get("document-uri") or inner.get("documentURL") or "")[:512],
+                            "blocked_uri": str(inner.get("blocked-uri") or inner.get("blockedURL") or "")[:512],
+                            "directive": str(inner.get("effective-directive") or inner.get("violated-directive") or inner.get("effectiveDirective") or "")[:128],
+                            "disposition": str(inner.get("disposition", ""))[:32],
+                            "source_file": str(inner.get("source-file") or inner.get("sourceFile") or "")[:512],
+                            "line": inner.get("line-number") or inner.get("lineNumber"),
+                        })
+                    if reports:
+                        violations_log = os.path.join(self.vault.vault_dir, "csp_violations.log")
+                        ts_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        with open(violations_log, "a", encoding="utf-8") as vf:
+                            for rep in reports:
+                                vf.write(json.dumps({
+                                    "ts": ts_now,
+                                    "ip_hash": ip_hash,
+                                    "report": rep
+                                }) + "\n")
+                        try:
+                            os.chmod(violations_log, 0o600)
+                        except OSError:
+                            pass
                 except Exception as err:
                     logger.debug("CSP report parsing error: %s", err)
                 await self._send_response(writer, 204, None, req_origin=req_origin)
@@ -2349,6 +2384,9 @@ class SupportApiServer:
             "X-Content-Type-Options: nosniff",
             "X-Frame-Options: DENY",
             "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'",
+            "Cross-Origin-Opener-Policy: same-origin",
+            "Cross-Origin-Resource-Policy: same-origin",
+            "X-Permitted-Cross-Domain-Policies: none",
             "Permissions-Policy: camera=(), microphone=(), geolocation=()",
             "Referrer-Policy: no-referrer",
             "Access-Control-Allow-Methods: GET, POST, OPTIONS",

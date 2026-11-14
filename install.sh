@@ -213,20 +213,124 @@ conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/ngi
 csp_map_path = "/etc/nginx/conf.d/ghost-csp-map.conf"
 sec_snippet_path = "/etc/nginx/snippets/ghost-security-headers.conf"
 
-csp_map_content = """# Ghost CMS & Support Portal Route-Aware Content-Security-Policy Map
-map $request_uri $ghost_csp {
+csp_mode = os.environ.get("GHOST_CSP_MODE", "report-only").strip().lower()
+coop_mode = os.environ.get("GHOST_COOP_MODE", "enforce").strip().lower()
+coop_strict = os.environ.get("GHOST_COOP_STRICT", "0").strip() == "1"
+coep_ro_enabled = os.environ.get("GHOST_COEP_REPORT_ONLY", "0").strip() == "1"
+
+# Exact SHA-256 hashes for Ghost 6.73.0 core inline scripts (private.hbs, gift-toast.hbs, comment_count.js)
+ghost_core_hashes = (
+    "'sha256-H+h75n/GKcH6MyrlNSDfC6ELZJddjfxP+2pQWqNo8XI=' "
+    "'sha256-r2ttV07T2feALZDJgQy/VOJNbiwvepytCFbDZN19hYg=' "
+    "'sha256-AbpHGcgLb+kRsJGnwFEktk7uzpZOCcBY74+YBdrKVGs='"
+)
+
+strict_default_csp = (
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; "
+    "form-action 'self' https://checkout.stripe.com https://hooks.stripe.com; "
+    f"script-src 'self' {ghost_core_hashes} https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+    "img-src 'self' data: blob: https://images.unsplash.com https://static.ghost.org https://gravatar.com https://*.gravatar.com https://cdn.jsdelivr.net https://*.wp.com https://*.googleusercontent.com; "
+    "media-src 'self' blob: https://www.youtube.com https://player.vimeo.com https://t.me; "
+    "connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; "
+    "frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; "
+    "worker-src 'self' blob:; trusted-types default; upgrade-insecure-requests"
+)
+
+strict_admin_csp = (
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; "
+    "form-action 'self'; "
+    "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+    "img-src 'self' data: blob: https:; "
+    "media-src 'self' blob: https:; "
+    "connect-src 'self' https://cdn.jsdelivr.net https://api.stripe.com https://api.unsplash.com https://*.ghost.org; "
+    "frame-src 'self' blob: https:; "
+    "worker-src 'self' blob:; upgrade-insecure-requests"
+)
+
+coop_map_lines = [
+    "# Cross-Origin-Opener-Policy (route-aware): same-origin on public HTML & /api/support/;",
+    "# same-origin-allow-popups on /ghost/* and /members/* unless GHOST_COOP_STRICT=1.",
+    "map $request_uri $ghost_coop {",
+]
+if not coop_strict:
+    coop_map_lines.append('    ~^/(?:ghost|members)/ "same-origin-allow-popups";')
+coop_map_lines.append('    default               "same-origin";')
+coop_map_lines.append("}")
+
+coep_ro_lines = [
+    "# Opt-in Cross-Origin-Embedder-Policy-Report-Only telemetry (empty disables header emission)",
+    "map $request_uri $ghost_coep_ro {",
+]
+if coep_ro_enabled:
+    coep_ro_lines.append('    ~^/ghost/ "";')
+    coep_ro_lines.append('    default   \'require-corp; report-to="csp-endpoint"\';')
+else:
+    coep_ro_lines.append('    default   "";')
+coep_ro_lines.append("}")
+
+csp_map_content = f"""# Ghost CMS & Support Portal Route-Aware Security Header Maps
+map $request_uri $ghost_csp {{
     ~^/ghost/ "frame-ancestors 'self'; base-uri 'self'; object-src 'none'";
-    default   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://images.unsplash.com https://static.ghost.org https://gravatar.com https://*.gravatar.com https://cdn.jsdelivr.net https://*.wp.com https://*.googleusercontent.com; media-src 'self' blob: https://www.youtube.com https://player.vimeo.com https://t.me; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; worker-src 'self' blob:; trusted-types default; upgrade-insecure-requests";
-}
+    default   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self' https://checkout.stripe.com https://hooks.stripe.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://images.unsplash.com https://static.ghost.org https://gravatar.com https://*.gravatar.com https://cdn.jsdelivr.net https://*.wp.com https://*.googleusercontent.com; media-src 'self' blob: https://www.youtube.com https://player.vimeo.com https://t.me; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; worker-src 'self' blob:; trusted-types default; upgrade-insecure-requests";
+}}
+
+map $request_uri $ghost_csp_strict {{
+    ~^/ghost/ "{strict_admin_csp}";
+    default   "{strict_default_csp}";
+}}
+
+{chr(10).join(coop_map_lines)}
+
+# Cross-Origin-Resource-Policy by resource class:
+# cross-origin for public syndicated media/favicons & public JWKS keys; same-origin for HTML, APIs, Admin, and built bundle assets.
+map $request_uri $ghost_corp {{
+    ~^/(?:members|ghost)/\\.well-known/ "cross-origin";
+    ~^/content/(?:images|media)/       "cross-origin";
+    ~^/favicon\\.                      "cross-origin";
+    default                            "same-origin";
+}}
+
+{chr(10).join(coep_ro_lines)}
 """
 
-sec_snippet_content = """# Ghost CMS & Support Portal Hardened Security Headers (included inside location /)
+if csp_mode == "enforce":
+    csp_header_lines = [
+        'add_header Content-Security-Policy "$ghost_csp_strict; report-uri /api/support/csp-report; report-to csp-endpoint" always;',
+    ]
+else:
+    csp_header_lines = [
+        'add_header Content-Security-Policy "$ghost_csp; report-uri /api/support/csp-report; report-to csp-endpoint" always;',
+        'add_header Content-Security-Policy-Report-Only "$ghost_csp_strict; report-uri /api/support/csp-report; report-to csp-endpoint" always;',
+    ]
+
+if coop_mode == "report-only":
+    coop_header_line = 'add_header Cross-Origin-Opener-Policy-Report-Only "$ghost_coop; report-to=\\"csp-endpoint\\"" always;'
+else:
+    coop_header_line = 'add_header Cross-Origin-Opener-Policy "$ghost_coop" always;'
+
+sec_snippet_content = f"""# Ghost CMS & Support Portal Hardened Security Headers (included inside location /)
+# Active rollout flags: GHOST_CSP_MODE={csp_mode}, GHOST_COOP_MODE={coop_mode}, GHOST_COOP_STRICT={int(coop_strict)}, GHOST_COEP_REPORT_ONLY={int(coep_ro_enabled)}
 proxy_hide_header X-Frame-Options;
 proxy_hide_header X-Content-Type-Options;
 proxy_hide_header Content-Security-Policy;
 proxy_hide_header Content-Security-Policy-Report-Only;
-add_header Content-Security-Policy "$ghost_csp; report-uri /api/support/csp-report" always;
-add_header Content-Security-Policy-Report-Only "$ghost_csp; report-uri /api/support/csp-report" always;
+proxy_hide_header Cross-Origin-Opener-Policy;
+proxy_hide_header Cross-Origin-Opener-Policy-Report-Only;
+proxy_hide_header Cross-Origin-Embedder-Policy;
+proxy_hide_header Cross-Origin-Embedder-Policy-Report-Only;
+proxy_hide_header Cross-Origin-Resource-Policy;
+proxy_hide_header X-Permitted-Cross-Domain-Policies;
+proxy_hide_header Reporting-Endpoints;
+add_header Reporting-Endpoints 'csp-endpoint="/api/support/csp-report"' always;
+{chr(10).join(csp_header_lines)}
+{coop_header_line}
+add_header Cross-Origin-Embedder-Policy-Report-Only $ghost_coep_ro always;
+add_header Cross-Origin-Resource-Policy "$ghost_corp" always;
+add_header X-Permitted-Cross-Domain-Policies "none" always;
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 add_header X-Frame-Options "SAMEORIGIN" always;
 add_header X-Content-Type-Options "nosniff" always;
@@ -241,7 +345,13 @@ proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_hide_header Cross-Origin-Opener-Policy;
+        proxy_hide_header Cross-Origin-Resource-Policy;
+        proxy_hide_header X-Permitted-Cross-Domain-Policies;
         add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Resource-Policy "same-origin" always;
+        add_header X-Permitted-Cross-Domain-Policies "none" always;
         client_max_body_size 50M;
     }"""
 
@@ -284,7 +394,12 @@ def patch_vhost_text(content: str) -> str:
             close_idx = find_matching_brace(out, brace_idx)
             if close_idx != -1:
                 block_slice = out[m.start():close_idx + 1]
-                if "Strict-Transport-Security" not in block_slice:
+                if (
+                    "Strict-Transport-Security" not in block_slice
+                    or "X-Permitted-Cross-Domain-Policies" not in block_slice
+                    or "Cross-Origin-Opener-Policy" not in block_slice
+                    or "Cross-Origin-Resource-Policy" not in block_slice
+                ):
                     out = out[:m.start()] + proxy_block + out[close_idx + 1:]
     else:
         loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
@@ -304,7 +419,7 @@ def patch_vhost_text(content: str) -> str:
         if "2368" not in inner:
             continue
         new_inner = re.sub(
-            r"^([ \t]*)(add_header\s+(?:X-Content-Type-Options|X-Frame-Options|Strict-Transport-Security|Content-Security-Policy)\b[^;\n]*;)",
+            r"^([ \t]*)(add_header\s+(?:X-Content-Type-Options|X-Frame-Options|Strict-Transport-Security|Content-Security-Policy(?:-Report-Only)?|Cross-Origin-Opener-Policy(?:-Report-Only)?|Cross-Origin-Embedder-Policy(?:-Report-Only)?|Cross-Origin-Resource-Policy|X-Permitted-Cross-Domain-Policies|Reporting-Endpoints)\b[^;\n]*;)",
             r"\1# [managed by ghost-security-headers.conf] \2",
             inner,
             flags=re.M | re.I,

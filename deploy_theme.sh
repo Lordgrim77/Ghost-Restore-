@@ -129,10 +129,15 @@ with zipfile.ZipFile(zip_src, 'r') as zf:
 PYEOF
 sudo rm -f "$THEME_ZIP"
 
-# Ensure clean page-support.hbs, page-about.hbs, and page-team.hbs are in place
+# Ensure clean page-support.hbs, page-about.hbs, page-team.hbs, and their external CSS/JS assets are in place
 fetch_verified_asset "page-support.hbs" "$THEME_DIR/page-support.hbs" "text"
 fetch_verified_asset "page-about.hbs" "$THEME_DIR/page-about.hbs" "text" || true
 fetch_verified_asset "page-team.hbs" "$THEME_DIR/page-team.hbs" "text" || true
+sudo mkdir -p "$THEME_DIR/assets/built"
+fetch_verified_asset "about-page.css" "$THEME_DIR/assets/built/about-page.css" "text" || true
+fetch_verified_asset "team-page.css" "$THEME_DIR/assets/built/team-page.css" "text" || true
+fetch_verified_asset "support-portal.css" "$THEME_DIR/assets/built/support-portal.css" "text" || true
+fetch_verified_asset "support-portal.js" "$THEME_DIR/assets/built/support-portal.js" "text" || true
 
 # 2. Update routes.yaml if settings dir exists
 echo -e "${BLUE}[3/8] Configuring content routes (routes.yaml)...${NC}"
@@ -255,198 +260,214 @@ PYEOF
 fi
 
 # 4b. Ghost Admin Sign-in Dark/Light Mode Theme Toggle & FOUC Synchronizer
-echo -e "${BLUE}[4b/8] Installing Ghost Admin Dark/Light Theme Toggle...${NC}"
+echo -e "${BLUE}[4b/8] Installing Ghost Admin Dark/Light Theme Toggle (external strict-CSP assets)...${NC}"
 sudo python3 - "$GHOST_DIR" <<'PYEOF'
 import os, sys, glob, re
 
 ghost_dir = sys.argv[1]
-head_patch = """    <!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme Toggle -->
-    <style id="gh-admin-theme-styles">
-      html.dark {
-        color-scheme: dark !important;
-      }
-      #gh-admin-theme-toggle {
-        position: fixed;
-        top: 22px;
-        right: 26px;
-        z-index: 99999;
-        display: none;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 16px;
-        border-radius: 9999px;
-        font-size: 13px;
-        font-weight: 600;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
-        cursor: pointer;
-        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        user-select: none;
-        outline: none;
-      }
-      #gh-admin-theme-toggle:hover {
-        transform: translateY(-1px);
-      }
 
-      /* Ghost Admin Sign-in Button Contrast Fix (Ensures 'Sign in' word is never white on white in light mode) */
-      html:not(.dark) .react-admin form button[type="submit"],
-      html:not(.dark) form button[type="submit"],
-      html:not(.dark) button.bg-ghostaccent {
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
-        background-color: #ffffff !important;
-        border: 1px solid rgba(0, 0, 0, 0.16) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
-        font-weight: 600 !important;
-      }
+admin_theme_css = """html.dark {
+  color-scheme: dark !important;
+}
 
-      html:not(.dark) .react-admin form button[type="submit"]:hover,
-      html:not(.dark) form button[type="submit"]:hover,
-      html:not(.dark) button.bg-ghostaccent:hover {
-        background-color: #f1f5f9 !important;
-        border-color: rgba(0, 0, 0, 0.28) !important;
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
-      }
+#gh-admin-theme-toggle {
+  position: fixed;
+  top: 22px;
+  right: 26px;
+  z-index: 99999;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  user-select: none;
+  outline: none;
+}
 
-      html:not(.dark) .react-admin form button[type="submit"]:disabled,
-      html:not(.dark) form button[type="submit"]:disabled,
-      html:not(.dark) button.bg-ghostaccent:disabled {
-        opacity: 0.65 !important;
-        cursor: not-allowed !important;
-      }
+#gh-admin-theme-toggle.is-visible {
+  display: inline-flex;
+}
 
-      html:not(.dark) .react-admin form button[type="submit"] svg,
-      html:not(.dark) form button[type="submit"] svg,
-      html:not(.dark) button.bg-ghostaccent svg {
-        color: #000000 !important;
-        stroke: #000000 !important;
-      }
+#gh-admin-theme-toggle.is-dark {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
 
-      html.dark .react-admin form button[type="submit"],
-      html.dark form button[type="submit"],
-      html.dark button.bg-ghostaccent {
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
-        background-color: #ffffff !important;
-        border: 1px solid #ffffff !important;
-        box-shadow: 0 4px 14px rgba(255, 255, 255, 0.15) !important;
-        font-weight: 600 !important;
-      }
+#gh-admin-theme-toggle.is-light {
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+}
 
-      html.dark .react-admin form button[type="submit"]:hover,
-      html.dark form button[type="submit"]:hover,
-      html.dark button.bg-ghostaccent:hover {
-        background-color: #f1f5f9 !important;
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
-      }
+#gh-admin-theme-toggle:hover {
+  transform: translateY(-1px);
+}
 
-      html.dark .react-admin form button[type="submit"] svg,
-      html.dark form button[type="submit"] svg,
-      html.dark button.bg-ghostaccent svg {
-        color: #000000 !important;
-        stroke: #000000 !important;
+/* Ghost Admin Sign-in Button Contrast Fix (Ensures 'Sign in' word is never white on white in light mode) */
+html:not(.dark) .react-admin form button[type="submit"],
+html:not(.dark) form button[type="submit"],
+html:not(.dark) button.bg-ghostaccent {
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+  background-color: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.16) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+  font-weight: 600 !important;
+}
+
+html:not(.dark) .react-admin form button[type="submit"]:hover,
+html:not(.dark) form button[type="submit"]:hover,
+html:not(.dark) button.bg-ghostaccent:hover {
+  background-color: #f1f5f9 !important;
+  border-color: rgba(0, 0, 0, 0.28) !important;
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+}
+
+html:not(.dark) .react-admin form button[type="submit"]:disabled,
+html:not(.dark) form button[type="submit"]:disabled,
+html:not(.dark) button.bg-ghostaccent:disabled {
+  opacity: 0.65 !important;
+  cursor: not-allowed !important;
+}
+
+html:not(.dark) .react-admin form button[type="submit"] svg,
+html:not(.dark) form button[type="submit"] svg,
+html:not(.dark) button.bg-ghostaccent svg {
+  color: #000000 !important;
+  stroke: #000000 !important;
+}
+
+html.dark .react-admin form button[type="submit"],
+html.dark form button[type="submit"],
+html.dark button.bg-ghostaccent {
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+  background-color: #ffffff !important;
+  border: 1px solid #ffffff !important;
+  box-shadow: 0 4px 14px rgba(255, 255, 255, 0.15) !important;
+  font-weight: 600 !important;
+}
+
+html.dark .react-admin form button[type="submit"]:hover,
+html.dark form button[type="submit"]:hover,
+html.dark button.bg-ghostaccent:hover {
+  background-color: #f1f5f9 !important;
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+}
+
+html.dark .react-admin form button[type="submit"] svg,
+html.dark form button[type="submit"] svg,
+html.dark button.bg-ghostaccent svg {
+  color: #000000 !important;
+  stroke: #000000 !important;
+}
+"""
+
+admin_bootstrap_js = """(function() {
+  try {
+    var saved = localStorage.getItem('ghost-admin-theme') || localStorage.getItem('user-theme');
+    var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var isDark = saved ? (saved === 'dark') : (prefersDark !== false);
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.style.colorScheme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
+    }
+  } catch (e) {}
+})();
+"""
+
+admin_toggle_js = """(function() {
+  function initToggle() {
+    if (document.getElementById('gh-admin-theme-toggle')) return;
+    var btn = document.createElement('button');
+    btn.id = 'gh-admin-theme-toggle';
+    btn.setAttribute('type', 'button');
+    btn.setAttribute('aria-label', 'Toggle theme');
+
+    function isDark() {
+      return document.documentElement.classList.contains('dark');
+    }
+
+    function renderState() {
+      var dark = isDark();
+      btn.classList.toggle('is-dark', dark);
+      btn.classList.toggle('is-light', !dark);
+      if (dark) {
+        btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg><span>Dark</span>';
+      } else {
+        btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg><span>Light</span>';
       }
-    </style>
-    <script id="gh-admin-theme-bootstrap">
-      (function() {
+    }
+
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      var nowDark = !isDark();
+      if (nowDark) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.style.colorScheme = 'dark';
         try {
-          var saved = localStorage.getItem('ghost-admin-theme') || localStorage.getItem('user-theme');
-          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var isDark = saved ? (saved === 'dark') : (prefersDark !== false);
-          if (isDark) {
-            document.documentElement.classList.add('dark');
-            document.documentElement.style.colorScheme = 'dark';
-          } else {
-            document.documentElement.classList.remove('dark');
-            document.documentElement.style.colorScheme = 'light';
-          }
-        } catch(e) {}
-      })();
-    </script>
+          localStorage.setItem('ghost-admin-theme', 'dark');
+          localStorage.setItem('user-theme', 'dark');
+        } catch (err) {}
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.style.colorScheme = 'light';
+        try {
+          localStorage.setItem('ghost-admin-theme', 'light');
+          localStorage.setItem('user-theme', 'light');
+        } catch (err) {}
+      }
+      renderState();
+    });
+
+    function checkVisibility() {
+      var isAuth = !!document.getElementById('admin-main') || !!document.querySelector('.gh-nav');
+      var hash = window.location.hash || '';
+      var isSignIn = hash.includes('signin') || hash.includes('signup') || hash.includes('setup') || hash.includes('reset') || hash === '' || hash === '#/';
+      btn.classList.toggle('is-visible', !isAuth && isSignIn);
+    }
+
+    renderState();
+    checkVisibility();
+    document.body.appendChild(btn);
+
+    window.addEventListener('hashchange', checkVisibility);
+    var observer = new MutationObserver(checkVisibility);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initToggle);
+  } else {
+    initToggle();
+  }
+})();
 """
 
-runtime_patch = """    <script id="gh-admin-theme-toggle-runtime">
-      (function() {
-        function initToggle() {
-          if (document.getElementById('gh-admin-theme-toggle')) return;
-          var btn = document.createElement('button');
-          btn.id = 'gh-admin-theme-toggle';
-          btn.setAttribute('type', 'button');
-          btn.setAttribute('aria-label', 'Toggle theme');
+head_patch = (
+    '    <!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme Toggle -->\n'
+    '    <link id="gh-admin-theme-styles-link" rel="stylesheet" href="./assets/gm-admin-theme.css">\n'
+    '    <script id="gh-admin-theme-bootstrap-script" src="./assets/gm-admin-theme-bootstrap.js"></script>\n'
+)
 
-          function isDark() {
-            return document.documentElement.classList.contains('dark');
-          }
-
-          function renderState() {
-            var dark = isDark();
-            if (dark) {
-              btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg><span>Dark</span>';
-              btn.style.background = 'rgba(255, 255, 255, 0.08)';
-              btn.style.color = '#ffffff';
-              btn.style.border = '1px solid rgba(255, 255, 255, 0.18)';
-              btn.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.35)';
-            } else {
-              btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg><span>Light</span>';
-              btn.style.background = 'rgba(255, 255, 255, 0.9)';
-              btn.style.color = '#0f172a';
-              btn.style.border = '1px solid rgba(15, 23, 42, 0.12)';
-              btn.style.boxShadow = '0 4px 20px rgba(15, 23, 42, 0.08)';
-            }
-          }
-
-          btn.onclick = function(e) {
-            e.preventDefault();
-            var nowDark = !isDark();
-            if (nowDark) {
-              document.documentElement.classList.add('dark');
-              document.documentElement.style.colorScheme = 'dark';
-              try {
-                localStorage.setItem('ghost-admin-theme', 'dark');
-                localStorage.setItem('user-theme', 'dark');
-              } catch(e) {}
-            } else {
-              document.documentElement.classList.remove('dark');
-              document.documentElement.style.colorScheme = 'light';
-              try {
-                localStorage.setItem('ghost-admin-theme', 'light');
-                localStorage.setItem('user-theme', 'light');
-              } catch(e) {}
-            }
-            renderState();
-          };
-
-          function checkVisibility() {
-            var isAuth = !!document.getElementById('admin-main') || !!document.querySelector('.gh-nav');
-            var hash = window.location.hash || '';
-            var isSignIn = hash.includes('signin') || hash.includes('signup') || hash.includes('setup') || hash.includes('reset') || hash === '' || hash === '#/';
-            if (!isAuth && isSignIn) {
-              btn.style.display = 'inline-flex';
-            } else {
-              btn.style.display = 'none';
-            }
-          }
-
-          renderState();
-          checkVisibility();
-          document.body.appendChild(btn);
-
-          window.addEventListener('hashchange', checkVisibility);
-          var observer = new MutationObserver(checkVisibility);
-          observer.observe(document.documentElement, { childList: true, subtree: true });
-        }
-
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', initToggle);
-        } else {
-          initToggle();
-        }
-      })();
-    </script>
-"""
+runtime_patch = (
+    '    <script id="gh-admin-theme-toggle-script" src="./assets/gm-admin-theme-toggle.js"></script>\n'
+)
 
 admin_candidates = [
     os.path.join(ghost_dir, "current", "core", "built", "admin", "index.html"),
@@ -460,50 +481,55 @@ for cand in admin_candidates:
     if not os.path.isfile(cand):
         continue
     try:
-        with open(cand, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
-        
-        modified = False
-        if "id=\"gh-admin-theme-styles\"" in content:
-            new_content = re.sub(
-                r'<!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme Toggle -->.*?</script>\s*',
-                head_patch,
-                content,
-                flags=re.DOTALL
-            )
-            if new_content != content:
-                content = new_content
-                modified = True
-        elif "</head>" in content:
-            content = content.replace("</head>", head_patch + "  </head>", 1)
-            modified = True
+        admin_dir = os.path.dirname(cand)
+        assets_dir = os.path.join(admin_dir, "assets")
+        os.makedirs(assets_dir, exist_ok=True)
+        for asset_name, asset_body in (
+            ("gm-admin-theme.css", admin_theme_css),
+            ("gm-admin-theme-bootstrap.js", admin_bootstrap_js),
+            ("gm-admin-theme-toggle.js", admin_toggle_js),
+        ):
+            asset_path = os.path.join(assets_dir, asset_name)
+            with open(asset_path, "w", encoding="utf-8", newline="\n") as af:
+                af.write(asset_body)
+            os.chmod(asset_path, 0o644)
 
-        if "id=\"gh-admin-theme-toggle-runtime\"" in content:
-            new_content = re.sub(
-                r'<script id="gh-admin-theme-toggle-runtime">.*?</script>\s*',
-                runtime_patch,
-                content,
-                flags=re.DOTALL
-            )
-            if new_content != content:
-                content = new_content
-                modified = True
-        elif "</body>" in content:
+        with open(cand, "r", encoding="utf-8", errors="ignore") as f:
+            original_content = f.read()
+
+        content = original_content
+        # Remove legacy inline blocks or prior external admin theme tags before re-inserting cleanly
+        content = re.sub(
+            r'[ \t]*<!-- Ghost Admin Obsidian Theme Synchronizer & Sign-in Theme Toggle -->\s*(?:<style id="gh-admin-theme-styles">.*?</style>\s*<script id="gh-admin-theme-bootstrap">.*?</script>|<link id="gh-admin-theme-styles-link"[^>]*>\s*<script id="gh-admin-theme-bootstrap-script"[^>]*></script>)\s*',
+            '',
+            content,
+            flags=re.DOTALL,
+        )
+        content = re.sub(r'[ \t]*<style id="gh-admin-theme-styles">.*?</style>\s*', '', content, flags=re.DOTALL)
+        content = re.sub(r'[ \t]*<script id="gh-admin-theme-bootstrap">.*?</script>\s*', '', content, flags=re.DOTALL)
+        content = re.sub(r'[ \t]*<script id="gh-admin-theme-toggle-runtime">.*?</script>\s*', '', content, flags=re.DOTALL)
+        content = re.sub(r'[ \t]*<link id="gh-admin-theme-styles-link"[^>]*>\s*', '', content)
+        content = re.sub(r'[ \t]*<script id="gh-admin-theme-bootstrap-script"[^>]*></script>\s*', '', content)
+        content = re.sub(r'[ \t]*<script id="gh-admin-theme-toggle-script"[^>]*></script>\s*', '', content)
+
+        if "</head>" in content:
+            content = content.replace("</head>", head_patch + "  </head>", 1)
+        if "</body>" in content:
             content = content.replace("</body>", runtime_patch + "  </body>", 1)
-            modified = True
-            
-        if modified:
-            with open(cand, "w", encoding="utf-8") as f:
+
+        if content != original_content:
+            with open(cand, "w", encoding="utf-8", newline="\n") as f:
                 f.write(content)
+            os.chmod(cand, 0o644)
             patched_count += 1
-            print(f"  ✓ Injected theme toggle & synchronizer into: {cand}")
+            print(f"  ✓ Installed external Ghost Admin theme assets & entrypoint tags: {cand}")
+        else:
+            print(f"  ✓ Synced external Ghost Admin theme assets (entrypoint already up to date): {cand}")
     except Exception as exc:
         print(f"  ⚠️ Admin patch warning for {cand}: {exc}")
 
 if patched_count > 0:
-    print(f"  ✓ Ghost Admin theme toggle successfully installed across {patched_count} entrypoint(s).")
-else:
-    print("  ✓ Ghost Admin theme toggle already in place.")
+    print(f"  ✓ Ghost Admin external theme toggle active across {patched_count} entrypoint(s).")
 PYEOF
 
 # 4. Social Thumbnail Image
@@ -628,27 +654,136 @@ PYEOF
 
 # 6. Configure Nginx Reverse Proxy, Route-Aware CSP & Security Headers
 echo -e "${BLUE}[6/8] Configuring Nginx /api/support/ proxy, route-aware CSP & security headers...${NC}"
-sudo python3 - <<'PYEOF' || true
+sudo \
+    GHOST_CSP_MODE="${GHOST_CSP_MODE:-report-only}" \
+    GHOST_COOP_MODE="${GHOST_COOP_MODE:-enforce}" \
+    GHOST_COOP_STRICT="${GHOST_COOP_STRICT:-0}" \
+    GHOST_COEP_REPORT_ONLY="${GHOST_COEP_REPORT_ONLY:-0}" \
+    python3 - <<'PYEOF' || true
 import sys, re, os, glob, subprocess
 
 conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/nginx/conf.d"]
 csp_map_path = "/etc/nginx/conf.d/ghost-csp-map.conf"
 sec_snippet_path = "/etc/nginx/snippets/ghost-security-headers.conf"
 
-csp_map_content = """# Ghost CMS & Support Portal Route-Aware Content-Security-Policy Map
-map $request_uri $ghost_csp {
+csp_mode = os.environ.get("GHOST_CSP_MODE", "report-only").strip().lower()
+coop_mode = os.environ.get("GHOST_COOP_MODE", "enforce").strip().lower()
+coop_strict = os.environ.get("GHOST_COOP_STRICT", "0").strip() == "1"
+coep_ro_enabled = os.environ.get("GHOST_COEP_REPORT_ONLY", "0").strip() == "1"
+
+# Exact SHA-256 hashes for Ghost 6.73.0 core inline scripts (private.hbs, gift-toast.hbs, comment_count.js)
+ghost_core_hashes = (
+    "'sha256-H+h75n/GKcH6MyrlNSDfC6ELZJddjfxP+2pQWqNo8XI=' "
+    "'sha256-r2ttV07T2feALZDJgQy/VOJNbiwvepytCFbDZN19hYg=' "
+    "'sha256-AbpHGcgLb+kRsJGnwFEktk7uzpZOCcBY74+YBdrKVGs='"
+)
+
+strict_default_csp = (
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; "
+    "form-action 'self' https://checkout.stripe.com https://hooks.stripe.com; "
+    f"script-src 'self' {ghost_core_hashes} https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+    "img-src 'self' data: blob: https://images.unsplash.com https://static.ghost.org https://gravatar.com https://*.gravatar.com https://cdn.jsdelivr.net https://*.wp.com https://*.googleusercontent.com; "
+    "media-src 'self' blob: https://www.youtube.com https://player.vimeo.com https://t.me; "
+    "connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; "
+    "frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; "
+    "worker-src 'self' blob:; trusted-types default; upgrade-insecure-requests"
+)
+
+strict_admin_csp = (
+    "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; "
+    "form-action 'self'; "
+    "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+    "font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+    "img-src 'self' data: blob: https:; "
+    "media-src 'self' blob: https:; "
+    "connect-src 'self' https://cdn.jsdelivr.net https://api.stripe.com https://api.unsplash.com https://*.ghost.org; "
+    "frame-src 'self' blob: https:; "
+    "worker-src 'self' blob:; upgrade-insecure-requests"
+)
+
+coop_map_lines = [
+    "# Cross-Origin-Opener-Policy (route-aware): same-origin on public HTML & /api/support/;",
+    "# same-origin-allow-popups on /ghost/* and /members/* unless GHOST_COOP_STRICT=1.",
+    "map $request_uri $ghost_coop {",
+]
+if not coop_strict:
+    coop_map_lines.append('    ~^/(?:ghost|members)/ "same-origin-allow-popups";')
+coop_map_lines.append('    default               "same-origin";')
+coop_map_lines.append("}")
+
+coep_ro_lines = [
+    "# Opt-in Cross-Origin-Embedder-Policy-Report-Only telemetry (empty disables header emission)",
+    "map $request_uri $ghost_coep_ro {",
+]
+if coep_ro_enabled:
+    coep_ro_lines.append('    ~^/ghost/ "";')
+    coep_ro_lines.append('    default   \'require-corp; report-to="csp-endpoint"\';')
+else:
+    coep_ro_lines.append('    default   "";')
+coep_ro_lines.append("}")
+
+csp_map_content = f"""# Ghost CMS & Support Portal Route-Aware Security Header Maps
+map $request_uri $ghost_csp {{
     ~^/ghost/ "frame-ancestors 'self'; base-uri 'self'; object-src 'none'";
-    default   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://images.unsplash.com https://static.ghost.org https://gravatar.com https://*.gravatar.com https://cdn.jsdelivr.net https://*.wp.com https://*.googleusercontent.com; media-src 'self' blob: https://www.youtube.com https://player.vimeo.com https://t.me; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; worker-src 'self' blob:; trusted-types default; upgrade-insecure-requests";
-}
+    default   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self' https://checkout.stripe.com https://hooks.stripe.com; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://js.stripe.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://images.unsplash.com https://static.ghost.org https://gravatar.com https://*.gravatar.com https://cdn.jsdelivr.net https://*.wp.com https://*.googleusercontent.com; media-src 'self' blob: https://www.youtube.com https://player.vimeo.com https://t.me; connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com https://static.cloudflareinsights.com https://api.stripe.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://platform.twitter.com https://t.me; worker-src 'self' blob:; trusted-types default; upgrade-insecure-requests";
+}}
+
+map $request_uri $ghost_csp_strict {{
+    ~^/ghost/ "{strict_admin_csp}";
+    default   "{strict_default_csp}";
+}}
+
+{chr(10).join(coop_map_lines)}
+
+# Cross-Origin-Resource-Policy by resource class:
+# cross-origin for public syndicated media/favicons & public JWKS keys; same-origin for HTML, APIs, Admin, and built bundle assets.
+map $request_uri $ghost_corp {{
+    ~^/(?:members|ghost)/\\.well-known/ "cross-origin";
+    ~^/content/(?:images|media)/       "cross-origin";
+    ~^/favicon\\.                      "cross-origin";
+    default                            "same-origin";
+}}
+
+{chr(10).join(coep_ro_lines)}
 """
 
-sec_snippet_content = """# Ghost CMS & Support Portal Hardened Security Headers (included inside location /)
+if csp_mode == "enforce":
+    csp_header_lines = [
+        'add_header Content-Security-Policy "$ghost_csp_strict; report-uri /api/support/csp-report; report-to csp-endpoint" always;',
+    ]
+else:
+    csp_header_lines = [
+        'add_header Content-Security-Policy "$ghost_csp; report-uri /api/support/csp-report; report-to csp-endpoint" always;',
+        'add_header Content-Security-Policy-Report-Only "$ghost_csp_strict; report-uri /api/support/csp-report; report-to csp-endpoint" always;',
+    ]
+
+if coop_mode == "report-only":
+    coop_header_line = 'add_header Cross-Origin-Opener-Policy-Report-Only "$ghost_coop; report-to=\\"csp-endpoint\\"" always;'
+else:
+    coop_header_line = 'add_header Cross-Origin-Opener-Policy "$ghost_coop" always;'
+
+sec_snippet_content = f"""# Ghost CMS & Support Portal Hardened Security Headers (included inside location /)
+# Active rollout flags: GHOST_CSP_MODE={csp_mode}, GHOST_COOP_MODE={coop_mode}, GHOST_COOP_STRICT={int(coop_strict)}, GHOST_COEP_REPORT_ONLY={int(coep_ro_enabled)}
 proxy_hide_header X-Frame-Options;
 proxy_hide_header X-Content-Type-Options;
 proxy_hide_header Content-Security-Policy;
 proxy_hide_header Content-Security-Policy-Report-Only;
-add_header Content-Security-Policy "$ghost_csp; report-uri /api/support/csp-report" always;
-add_header Content-Security-Policy-Report-Only "$ghost_csp; report-uri /api/support/csp-report" always;
+proxy_hide_header Cross-Origin-Opener-Policy;
+proxy_hide_header Cross-Origin-Opener-Policy-Report-Only;
+proxy_hide_header Cross-Origin-Embedder-Policy;
+proxy_hide_header Cross-Origin-Embedder-Policy-Report-Only;
+proxy_hide_header Cross-Origin-Resource-Policy;
+proxy_hide_header X-Permitted-Cross-Domain-Policies;
+proxy_hide_header Reporting-Endpoints;
+add_header Reporting-Endpoints 'csp-endpoint="/api/support/csp-report"' always;
+{chr(10).join(csp_header_lines)}
+{coop_header_line}
+add_header Cross-Origin-Embedder-Policy-Report-Only $ghost_coep_ro always;
+add_header Cross-Origin-Resource-Policy "$ghost_corp" always;
+add_header X-Permitted-Cross-Domain-Policies "none" always;
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 add_header X-Frame-Options "SAMEORIGIN" always;
 add_header X-Content-Type-Options "nosniff" always;
@@ -663,7 +798,13 @@ proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_hide_header Cross-Origin-Opener-Policy;
+        proxy_hide_header Cross-Origin-Resource-Policy;
+        proxy_hide_header X-Permitted-Cross-Domain-Policies;
         add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Resource-Policy "same-origin" always;
+        add_header X-Permitted-Cross-Domain-Policies "none" always;
         client_max_body_size 50M;
     }"""
 
@@ -707,7 +848,12 @@ def patch_vhost_text(content: str) -> str:
             close_idx = find_matching_brace(out, brace_idx)
             if close_idx != -1:
                 block_slice = out[m.start():close_idx + 1]
-                if "Strict-Transport-Security" not in block_slice:
+                if (
+                    "Strict-Transport-Security" not in block_slice
+                    or "X-Permitted-Cross-Domain-Policies" not in block_slice
+                    or "Cross-Origin-Opener-Policy" not in block_slice
+                    or "Cross-Origin-Resource-Policy" not in block_slice
+                ):
                     out = out[:m.start()] + proxy_block + out[close_idx + 1:]
     else:
         loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
@@ -728,7 +874,7 @@ def patch_vhost_text(content: str) -> str:
         if "2368" not in inner:
             continue
         new_inner = re.sub(
-            r"^([ \t]*)(add_header\s+(?:X-Content-Type-Options|X-Frame-Options|Strict-Transport-Security|Content-Security-Policy)\b[^;\n]*;)",
+            r"^([ \t]*)(add_header\s+(?:X-Content-Type-Options|X-Frame-Options|Strict-Transport-Security|Content-Security-Policy(?:-Report-Only)?|Cross-Origin-Opener-Policy(?:-Report-Only)?|Cross-Origin-Embedder-Policy(?:-Report-Only)?|Cross-Origin-Resource-Policy|X-Permitted-Cross-Domain-Policies|Reporting-Endpoints)\b[^;\n]*;)",
             r"\1# [managed by ghost-security-headers.conf] \2",
             inner,
             flags=re.M | re.I,
