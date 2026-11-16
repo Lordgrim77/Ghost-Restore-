@@ -5,6 +5,80 @@
   const API_BASE = '/api/support';
   const POLL_INTERVAL_MS = 4000;
   const MAX_ATTACH_BYTES = 20 * 1024 * 1024;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  const ICON_PATHS = {
+    paperclip: [
+      'm21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48',
+    ],
+    message: [
+      'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+    ],
+    inbox: [
+      'M22 12h-6l-2 3h-4l-2-3H2',
+      'M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
+    ],
+    image: [
+      'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z',
+      'm21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21',
+      'M9 9h.01',
+    ],
+    video: [
+      'm16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5',
+      'M2 6h14v12H2z',
+    ],
+    audio: [
+      'M9 18V5l12-2v13',
+      'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+      'M18 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    ],
+    fileText: [
+      'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z',
+      'M14 2v4a2 2 0 0 0 2 2h4',
+      'M10 9H8',
+      'M16 13H8',
+      'M16 17H8',
+    ],
+    archive: [
+      'M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z',
+      'm3.3 7 8.7 5 8.7-5',
+      'M12 22V12',
+    ],
+    eye: [
+      'M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z',
+      'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    ],
+    download: [
+      'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4',
+      'm7 10 5 5 5-5',
+      'M12 15V3',
+    ],
+    send: [
+      'm22 2-7 20-4-9-9-4Z',
+      'M22 2 11 13',
+    ],
+  };
+
+  function createSvgIcon(name, sizeClass, sizePx) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'tga-svg-icon ' + sizeClass);
+    svg.setAttribute('width', String(sizePx));
+    svg.setAttribute('height', String(sizePx));
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const paths = ICON_PATHS[name] || ICON_PATHS.fileText;
+    for (const d of paths) {
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('d', d);
+      svg.appendChild(p);
+    }
+    return svg;
+  }
 
   // Ephemeral in-memory session state only (never written to localStorage or URL)
   let sessionToken = '';
@@ -40,22 +114,27 @@
   const btnRefreshAll = document.getElementById('btnRefreshAll');
   const btnThemeToggle = document.getElementById('btnThemeToggle');
   const caseSearchInput = document.getElementById('caseSearchInput');
+  const btnClearSearch = document.getElementById('btnClearSearch');
   const inboxList = document.getElementById('inboxList');
 
   const detailEmpty = document.getElementById('detailEmpty');
   const detailBody = document.getElementById('detailBody');
+  const detailCaseCodeBtn = document.getElementById('detailCaseCodeBtn');
   const detailCaseCode = document.getElementById('detailCaseCode');
   const detailStatusPill = document.getElementById('detailStatusPill');
   const detailPriorityPill = document.getElementById('detailPriorityPill');
   const detailClaimBadge = document.getElementById('detailClaimBadge');
   const detailCreatedAt = document.getElementById('detailCreatedAt');
   const detailSubject = document.getElementById('detailSubject');
+  const btnToggleCaseMeta = document.getElementById('btnToggleCaseMeta');
+  const detailMetaBrief = document.getElementById('detailMetaBrief');
   const detailCategory = document.getElementById('detailCategory');
   const detailReporter = document.getElementById('detailReporter');
   const detailMember = document.getElementById('detailMember');
   const detailContact = document.getElementById('detailContact');
 
   const btnClaimCase = document.getElementById('btnClaimCase');
+  const btnClaimCaseLabel = document.getElementById('btnClaimCaseLabel');
   const btnOpenStatusModal = document.getElementById('btnOpenStatusModal');
   const btnDeleteCase = document.getElementById('btnDeleteCase');
 
@@ -138,7 +217,7 @@
   });
 
   // ------------------------------------------------------------------
-  // Helpers
+  // Helpers & Light-Dismiss Fallback
   // ------------------------------------------------------------------
   let toastTimer = null;
   function showToast(msg) {
@@ -176,6 +255,13 @@
     return String(isoStr).slice(0, 16).replace('T', ' ') + ' UTC';
   }
 
+  function getFileExtension(filename) {
+    const raw = String(filename || '').trim();
+    const dot = raw.lastIndexOf('.');
+    if (dot <= 0 || dot === raw.length - 1) return 'FILE';
+    return raw.slice(dot + 1, dot + 6).toUpperCase();
+  }
+
   function setMobileView(view) {
     consoleView.setAttribute('data-mobile-view', view);
     if (tg && tg.BackButton) {
@@ -185,6 +271,29 @@
         tg.BackButton.hide();
       }
     }
+  }
+
+  function setupDialogLightDismiss(dlg, onClose) {
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+      let pressedOutside = false;
+      const isOutside = (ev) => {
+        const r = dlg.getBoundingClientRect();
+        return ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom;
+      };
+      dlg.addEventListener('pointerdown', (ev) => {
+        pressedOutside = isOutside(ev);
+      });
+      dlg.addEventListener('pointerup', (ev) => {
+        if (pressedOutside && isOutside(ev)) {
+          if (onClose) onClose();
+          else dlg.close();
+        }
+        pressedOutside = false;
+      });
+    }
+    dlg.addEventListener('close', () => {
+      dlg.returnValue = '';
+    });
   }
 
   function showGateError(title, message, allowRetry) {
@@ -345,6 +454,19 @@
     document.getElementById('cntRejected').textContent = String(counts.REJECTED || 0);
   }
 
+  function resetInboxFilters() {
+    activeFilter = 'ALL';
+    activeSearch = '';
+    caseSearchInput.value = '';
+    btnClearSearch.classList.add('is-hidden');
+    document.querySelectorAll('.tga-filter-pill').forEach((el) => {
+      const isAll = el.getAttribute('data-status') === 'ALL';
+      el.classList.toggle('active', isAll);
+      el.setAttribute('aria-selected', String(isAll));
+    });
+    loadInbox(true);
+  }
+
   function renderInbox() {
     clearNode(inboxList);
     const items = activeFilter === 'UNREAD'
@@ -352,10 +474,27 @@
       : allCases;
 
     if (!items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'gm-chat-empty';
-      empty.textContent = 'No cases match the current filter.';
-      inboxList.appendChild(empty);
+      const wrap = document.createElement('div');
+      wrap.className = 'tga-glass-card tga-inbox-empty-card';
+      const iconBox = document.createElement('div');
+      iconBox.className = 'tga-ev-icon-well';
+      iconBox.appendChild(createSvgIcon('inbox', 'tga-svg-24', 24));
+      const msg = document.createElement('p');
+      msg.className = 'tga-gate-desc';
+      msg.textContent = activeSearch || activeFilter !== 'ALL'
+        ? 'No cases match the current filter.'
+        : 'No support cases have been submitted yet.';
+      wrap.appendChild(iconBox);
+      wrap.appendChild(msg);
+      if (activeSearch || activeFilter !== 'ALL') {
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'tga-btn tga-btn-secondary tga-btn-sm';
+        resetBtn.textContent = 'Show All Cases';
+        resetBtn.addEventListener('click', resetInboxFilters);
+        wrap.appendChild(resetBtn);
+      }
+      inboxList.appendChild(wrap);
       return;
     }
 
@@ -405,14 +544,42 @@
       const foot = document.createElement('div');
       foot.className = 'tga-case-item-foot';
 
-      const leftFoot = document.createElement('span');
-      const ownerTag = c.assigned_admin_name ? ' · ' + c.assigned_admin_name : '';
-      leftFoot.textContent = `${c.priority || 'STANDARD'} · 📎 ${c.file_count || 0} · 💬 ${c.msg_count || 0}${ownerTag}`;
+      const metrics = document.createElement('div');
+      metrics.className = 'tga-foot-metrics';
+
+      const prioStr = String(c.priority || 'STANDARD').toUpperCase();
+      const prioSpan = document.createElement('span');
+      prioSpan.className = prioStr === 'CRITICAL'
+        ? 'tga-foot-prio-crit'
+        : prioStr === 'URGENT'
+          ? 'tga-foot-prio-urg'
+          : '';
+      prioSpan.textContent = prioStr;
+      metrics.appendChild(prioSpan);
+
+      const fileChip = document.createElement('span');
+      fileChip.className = 'tga-foot-chip';
+      fileChip.appendChild(createSvgIcon('paperclip', 'tga-svg-12', 12));
+      fileChip.appendChild(document.createTextNode(String(c.file_count || 0)));
+      metrics.appendChild(fileChip);
+
+      const msgChip = document.createElement('span');
+      msgChip.className = 'tga-foot-chip';
+      msgChip.appendChild(createSvgIcon('message', 'tga-svg-12', 12));
+      msgChip.appendChild(document.createTextNode(String(c.msg_count || 0)));
+      metrics.appendChild(msgChip);
+
+      if (c.assigned_admin_name) {
+        const ownerSpan = document.createElement('span');
+        ownerSpan.textContent = '· ' + c.assigned_admin_name;
+        metrics.appendChild(ownerSpan);
+      }
 
       const rightFoot = document.createElement('span');
+      rightFoot.className = 'tga-meta-muted';
       rightFoot.textContent = formatTimestamp(c.updated_at || c.created_at).slice(0, 10);
 
-      foot.appendChild(leftFoot);
+      foot.appendChild(metrics);
       foot.appendChild(rightFoot);
 
       btn.appendChild(top);
@@ -439,10 +606,19 @@
   let searchDebounce = null;
   caseSearchInput.addEventListener('input', function () {
     activeSearch = caseSearchInput.value.trim();
+    btnClearSearch.classList.toggle('is-hidden', caseSearchInput.value.length === 0);
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(function () {
       loadInbox(true);
     }, 220);
+  });
+
+  btnClearSearch.addEventListener('click', function () {
+    caseSearchInput.value = '';
+    activeSearch = '';
+    btnClearSearch.classList.add('is-hidden');
+    caseSearchInput.focus();
+    loadInbox(true);
   });
 
   btnRefreshAll.addEventListener('click', async function () {
@@ -481,9 +657,33 @@
     }
   }
 
+  btnToggleCaseMeta.addEventListener('click', function () {
+    const nextOpen = !detailBody.classList.contains('is-meta-open');
+    detailBody.classList.toggle('is-meta-open', nextOpen);
+    btnToggleCaseMeta.setAttribute('aria-expanded', String(nextOpen));
+  });
+
+  detailCaseCodeBtn.addEventListener('click', async function () {
+    if (!selectedCaseCode) return;
+    const text = '#' + selectedCaseCode;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+        showToast('Copied ' + text);
+        return;
+      }
+    } catch (_) {}
+    showToast(text);
+  });
+
   async function openCase(caseCode, opts = {}) {
+    const isSwitchingCase = selectedCaseCode !== caseCode;
     selectedCaseCode = caseCode;
     setMobileView('detail');
+    if (isSwitchingCase && !opts.preserveMeta) {
+      detailBody.classList.remove('is-meta-open');
+      btnToggleCaseMeta.setAttribute('aria-expanded', 'false');
+    }
     renderInbox();
 
     try {
@@ -523,13 +723,13 @@
 
     const isClaimedByMe = currentAdmin && c.assigned_admin_id && Number(c.assigned_admin_id) === Number(currentAdmin.user_id);
     if (!c.assigned_admin_id) {
-      btnClaimCase.textContent = 'Claim Case';
+      btnClaimCaseLabel.textContent = 'Claim Case';
       btnClaimCase.disabled = false;
     } else if (isClaimedByMe || (currentAdmin && currentAdmin.is_super_admin)) {
-      btnClaimCase.textContent = isClaimedByMe ? 'Release Claim' : 'Take Over / Release';
+      btnClaimCaseLabel.textContent = isClaimedByMe ? 'Release' : 'Take Over';
       btnClaimCase.disabled = false;
     } else {
-      btnClaimCase.textContent = 'Claimed by ' + c.assigned_admin_name;
+      btnClaimCaseLabel.textContent = c.assigned_admin_name;
       btnClaimCase.disabled = true;
     }
 
@@ -537,8 +737,13 @@
 
     detailCreatedAt.textContent = formatTimestamp(c.created_at);
     detailSubject.textContent = c.subject || 'No Subject';
-    detailCategory.textContent = 'Category: ' + (c.category || 'Support');
-    detailReporter.textContent = 'Reporter: ' + (c.reporter_alias || 'Anonymous');
+
+    const repAlias = c.reporter_alias || 'Anonymous';
+    const catName = c.category || 'Support';
+    detailMetaBrief.textContent = `${repAlias} · ${catName}`;
+
+    detailCategory.textContent = 'Category: ' + catName;
+    detailReporter.textContent = 'Reporter: ' + repAlias;
 
     if (c.member_email) {
       detailMember.textContent = 'Member: ' + c.member_email;
@@ -607,6 +812,14 @@
     }
   }
 
+  function getEvidenceIconKind(lowerName) {
+    if (/\.(jpg|jpeg|png|webp|gif|bmp)$/.test(lowerName)) return 'image';
+    if (/\.(mp4|webm|mov)$/.test(lowerName)) return 'video';
+    if (/\.(mp3|wav|ogg|m4a)$/.test(lowerName)) return 'audio';
+    if (/\.(txt|log|csv|json|eml|pdf)$/.test(lowerName)) return 'fileText';
+    return 'archive';
+  }
+
   function renderEvidenceGrid(caseCode, files) {
     revokeThumbUrls();
     clearNode(evidenceGrid);
@@ -614,7 +827,13 @@
     if (!files.length) {
       const empty = document.createElement('div');
       empty.className = 'tga-glass-card tga-empty-detail';
-      empty.textContent = 'No evidence files attached to this case.';
+      const well = document.createElement('div');
+      well.className = 'tga-ev-icon-well';
+      well.appendChild(createSvgIcon('inbox', 'tga-svg-24', 24));
+      const p = document.createElement('p');
+      p.textContent = 'No evidence files attached to this case.';
+      empty.appendChild(well);
+      empty.appendChild(p);
       evidenceGrid.appendChild(empty);
       return;
     }
@@ -623,29 +842,36 @@
       const card = document.createElement('article');
       card.className = 'tga-glass-card tga-evidence-card';
 
-      const thumbWrap = document.createElement('div');
-      thumbWrap.className = 'tga-ev-thumb-wrap';
       const lowerName = String(f.name || '').toLowerCase();
       const isImage = /\.(jpg|jpeg|png|webp|gif|bmp)$/.test(lowerName) && f.previewable;
-      if (isImage) {
-        const placeholder = document.createElement('span');
-        placeholder.className = 'tga-ev-thumb-icon';
-        placeholder.textContent = '🖼️';
-        thumbWrap.appendChild(placeholder);
-        loadThumbnailAsync(caseCode, f.id, thumbWrap);
+      const extLabel = getFileExtension(f.name);
+
+      const thumbWrap = f.previewable
+        ? document.createElement('button')
+        : document.createElement('div');
+      if (f.previewable) {
+        thumbWrap.type = 'button';
+        thumbWrap.className = 'tga-ev-thumb-wrap tga-ev-thumb-trigger';
+        thumbWrap.setAttribute('aria-label', 'Inspect ' + (f.name || 'evidence'));
+        thumbWrap.addEventListener('click', function () {
+          openEvidenceModal(caseCode, f);
+        });
       } else {
-        const icon = document.createElement('span');
-        icon.className = 'tga-ev-thumb-icon';
-        icon.textContent = /\.(mp4|webm|mov)$/.test(lowerName)
-          ? '🎬'
-          : /\.(mp3|wav|ogg|m4a)$/.test(lowerName)
-            ? '🎧'
-            : /\.pdf$/.test(lowerName)
-              ? '📕'
-              : /\.(txt|log|csv|json|eml)$/.test(lowerName)
-                ? '📄'
-                : '📦';
-        thumbWrap.appendChild(icon);
+        thumbWrap.className = 'tga-ev-thumb-wrap';
+      }
+
+      const well = document.createElement('div');
+      well.className = 'tga-ev-icon-well';
+      well.appendChild(createSvgIcon(getEvidenceIconKind(lowerName), 'tga-svg-24', 24));
+      thumbWrap.appendChild(well);
+
+      const extBadge = document.createElement('span');
+      extBadge.className = 'tga-ev-ext-badge';
+      extBadge.textContent = extLabel;
+      thumbWrap.appendChild(extBadge);
+
+      if (isImage) {
+        loadThumbnailAsync(caseCode, f.id, thumbWrap, extLabel);
       }
 
       const nameEl = document.createElement('p');
@@ -664,8 +890,9 @@
       if (f.previewable) {
         const inspectBtn = document.createElement('button');
         inspectBtn.type = 'button';
-        inspectBtn.className = 'tga-btn tga-btn-primary';
-        inspectBtn.textContent = 'Inspect';
+        inspectBtn.className = 'tga-btn tga-btn-primary tga-btn-sm tga-ev-btn-inspect';
+        inspectBtn.appendChild(createSvgIcon('eye', 'tga-svg-14', 14));
+        inspectBtn.appendChild(document.createTextNode('Inspect'));
         inspectBtn.addEventListener('click', function () {
           openEvidenceModal(caseCode, f);
         });
@@ -675,8 +902,9 @@
       if (f.can_direct_dl) {
         const dlBtn = document.createElement('button');
         dlBtn.type = 'button';
-        dlBtn.className = 'tga-btn tga-btn-secondary';
-        dlBtn.textContent = 'Download';
+        dlBtn.className = 'tga-btn tga-btn-secondary tga-btn-sm';
+        dlBtn.appendChild(createSvgIcon('download', 'tga-svg-14', 14));
+        dlBtn.appendChild(document.createTextNode('Download'));
         dlBtn.addEventListener('click', function () {
           triggerEvidenceDownload(caseCode, f);
         });
@@ -685,8 +913,9 @@
 
       const dmBtn = document.createElement('button');
       dmBtn.type = 'button';
-      dmBtn.className = 'tga-btn tga-btn-secondary';
-      dmBtn.textContent = f.can_direct_dl ? 'Send to DM' : 'Send (>20MB) to DM';
+      dmBtn.className = 'tga-btn tga-btn-secondary tga-btn-sm' + (f.can_direct_dl ? '' : ' tga-ev-btn-span');
+      dmBtn.appendChild(createSvgIcon('send', 'tga-svg-14', 14));
+      dmBtn.appendChild(document.createTextNode(f.can_direct_dl ? 'Send to DM' : 'Send (>20MB) DM'));
       dmBtn.addEventListener('click', function () {
         sendEvidenceToDm(caseCode, f);
       });
@@ -700,7 +929,7 @@
     }
   }
 
-  async function loadThumbnailAsync(caseCode, evId, container) {
+  async function loadThumbnailAsync(caseCode, evId, container, extLabel) {
     try {
       const res = await apiFetch(`/admin/cases/${encodeURIComponent(caseCode)}/evidence/${evId}?preview=1`, {
         headers: { 'X-Preview': '1' },
@@ -714,7 +943,12 @@
       img.alt = 'Evidence thumbnail';
       img.src = blobUrl;
       clearNode(container);
+      container.classList.add('is-image');
       container.appendChild(img);
+      const badge = document.createElement('span');
+      badge.className = 'tga-ev-ext-badge';
+      badge.textContent = extLabel;
+      container.appendChild(badge);
     } catch (_) {}
   }
 
@@ -805,6 +1039,18 @@
     adminAttachPreview.classList.add('is-hidden');
   });
 
+  adminReplyInput.addEventListener('keydown', function (ev) {
+    const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    if (!isTouch && ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      if (typeof adminChatForm.requestSubmit === 'function') {
+        adminChatForm.requestSubmit();
+      } else {
+        btnSendReply.click();
+      }
+    }
+  });
+
   let isSendingReply = false;
   adminChatForm.addEventListener('submit', async function (ev) {
     ev.preventDefault();
@@ -848,7 +1094,11 @@
     } finally {
       isSendingReply = false;
       btnSendReply.disabled = false;
-      btnSendReply.textContent = 'Send';
+      clearNode(btnSendReply);
+      btnSendReply.appendChild(createSvgIcon('send', 'tga-svg-15', 15));
+      const lbl = document.createElement('span');
+      lbl.textContent = 'Send';
+      btnSendReply.appendChild(lbl);
     }
   });
 
@@ -867,9 +1117,7 @@
   }
 
   btnCloseEvDialog.addEventListener('click', closeEvidenceModal);
-  evidenceDialog.addEventListener('click', function (ev) {
-    if (ev.target === evidenceDialog) closeEvidenceModal();
-  });
+  setupDialogLightDismiss(evidenceDialog, closeEvidenceModal);
   evidenceDialog.addEventListener('close', function () {
     if (currentPreviewBlobUrl) {
       try {
@@ -877,6 +1125,7 @@
       } catch (_) {}
       currentPreviewBlobUrl = null;
     }
+    clearNode(evDialogStage);
   });
 
   async function openEvidenceModal(caseCode, item) {
@@ -920,7 +1169,11 @@
           const img = document.createElement('img');
           img.className = 'tga-ev-stage-img';
           img.alt = item.name || 'Evidence image';
+          img.title = 'Click to toggle 1:1 zoom';
           img.src = currentPreviewBlobUrl;
+          img.addEventListener('click', function () {
+            img.classList.toggle('is-zoomed');
+          });
           evDialogStage.appendChild(img);
         } else if (/\.(mp4|webm|mov)$/.test(lower)) {
           const vid = document.createElement('video');
@@ -969,7 +1222,6 @@
         showToast('Download started');
         return;
       }
-      // Browser / older WebView fallback: direct navigation consumes one-time ticket
       const a = document.createElement('a');
       a.href = absUrl;
       a.download = tData.filename || item.name || 'evidence.bin';
@@ -1038,9 +1290,7 @@
 
   btnCloseStatusDialog.addEventListener('click', function () { statusDialog.close(); });
   btnCancelStatus.addEventListener('click', function () { statusDialog.close(); });
-  statusDialog.addEventListener('click', function (ev) {
-    if (ev.target === statusDialog) statusDialog.close();
-  });
+  setupDialogLightDismiss(statusDialog);
 
   statusForm.addEventListener('submit', async function (ev) {
     ev.preventDefault();
@@ -1074,9 +1324,7 @@
 
   btnCloseDeleteDialog.addEventListener('click', function () { deleteDialog.close(); });
   btnCancelDelete.addEventListener('click', function () { deleteDialog.close(); });
-  deleteDialog.addEventListener('click', function (ev) {
-    if (ev.target === deleteDialog) deleteDialog.close();
-  });
+  setupDialogLightDismiss(deleteDialog);
 
   btnConfirmDelete.addEventListener('click', async function () {
     if (!selectedCaseCode) return;

@@ -19,7 +19,12 @@
     <main id="gateView" class="tga-gate-wrap" aria-live="polite">
       <section class="tga-glass-card tga-gate-card">
         <div id="gateSpinner" class="tga-spinner" aria-hidden="true"></div>
-        <div id="gateLockBadge" class="tga-lock-badge is-hidden" aria-hidden="true">🔒</div>
+        <div id="gateLockBadge" class="tga-lock-badge is-hidden" aria-hidden="true">
+          <svg class="tga-svg-icon tga-svg-24" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
         <h1 id="gateTitle" class="tga-gate-title">Verifying Admin Session</h1>
         <p id="gateMessage" class="tga-gate-desc">Checking Telegram cryptographic credentials...</p>
         <div id="gateActions" class="tga-gate-actions is-hidden">
@@ -32,15 +37,48 @@
     <div id="consoleView" class="tga-console is-hidden" data-mobile-view="inbox">
       <header class="tga-topbar">
         <div class="tga-topbar-left">
-          <button type="button" id="btnMobileBack" class="tga-icon-btn tga-mobile-only" aria-label="Back to inbox">←</button>
+          <button type="button" id="btnMobileBack" class="tga-icon-btn tga-mobile-only" aria-label="Back to inbox" title="Back to inbox">
+            <svg class="tga-svg-icon tga-svg-18" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M19 12H5"></path>
+              <path d="m12 19-7-7 7-7"></path>
+            </svg>
+          </button>
+          <span class="tga-brand-badge" aria-hidden="true">
+            <svg class="tga-svg-icon tga-svg-16" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <path d="m9 12 2 2 4-4"></path>
+            </svg>
+          </span>
           <span class="gm-live-dot" aria-hidden="true"></span>
           <span class="tga-brand-title">Support Console</span>
           <span id="adminRoleBadge" class="tga-role-pill">Admin</span>
         </div>
         <div class="tga-topbar-right">
           <span id="adminIdentityLabel" class="tga-admin-name"></span>
-          <button type="button" id="btnRefreshAll" class="tga-icon-btn" title="Refresh cases" aria-label="Refresh cases">↻</button>
-          <button type="button" id="btnThemeToggle" class="tga-icon-btn" title="Toggle light or dark theme" aria-label="Toggle theme">◐</button>
+          <button type="button" id="btnRefreshAll" class="tga-icon-btn" title="Refresh cases" aria-label="Refresh cases">
+            <svg class="tga-svg-icon tga-svg-16" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+              <path d="M16 16h5v5"></path>
+            </svg>
+          </button>
+          <button type="button" id="btnThemeToggle" class="tga-icon-btn" title="Toggle light or dark theme" aria-label="Toggle theme">
+            <svg class="tga-svg-icon tga-svg-16 tga-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2"></path>
+              <path d="M12 20v2"></path>
+              <path d="m4.93 4.93 1.41 1.41"></path>
+              <path d="m17.66 17.66 1.41 1.41"></path>
+              <path d="M2 12h2"></path>
+              <path d="M20 12h2"></path>
+              <path d="m6.34 17.66-1.41 1.41"></path>
+              <path d="m19.07 4.93-1.41 1.41"></path>
+            </svg>
+            <svg class="tga-svg-icon tga-svg-16 tga-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -48,8 +86,20 @@
         <!-- Left Pane: Case Inbox -->
         <aside id="inboxPane" class="tga-inbox-pane" aria-label="Support cases inbox">
           <div class="tga-inbox-controls">
-            <label class="tga-sr-only" for="caseSearchInput">Search cases</label>
-            <input type="search" id="caseSearchInput" class="tga-input tga-search-input" placeholder="Search #CASE, subject, reporter..." autocomplete="off">
+            <div class="tga-search-wrap">
+              <svg class="tga-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.3-4.3"></path>
+              </svg>
+              <label class="tga-sr-only" for="caseSearchInput">Search cases</label>
+              <input type="search" id="caseSearchInput" class="tga-input tga-search-input" placeholder="Search #CASE, subject, reporter..." autocomplete="off">
+              <button type="button" id="btnClearSearch" class="tga-search-clear is-hidden" aria-label="Clear search" title="Clear search">
+                <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M18 6 6 18"></path>
+                  <path d="m6 6 12 12"></path>
+                </svg>
+              </button>
+            </div>
             <div id="statusFilterBar" class="tga-filter-pills" role="tablist" aria-label="Filter cases by status">
               <button type="button" class="tga-filter-pill active" data-status="ALL" role="tab" aria-selected="true">All <span class="tga-count-pill" id="cntAll">0</span></button>
               <button type="button" class="tga-filter-pill" data-status="UNREAD" role="tab" aria-selected="false">Unread <span class="tga-count-pill tga-count-unread" id="cntUnread">0</span></button>
@@ -66,17 +116,28 @@
         <!-- Right Pane: Case Inspector & Chat -->
         <section id="detailPane" class="tga-detail-pane" aria-label="Case details">
           <div id="detailEmpty" class="tga-glass-card tga-empty-detail">
-            <div class="tga-empty-icon">🛡️</div>
+            <div class="tga-empty-icon" aria-hidden="true">
+              <svg class="tga-svg-icon tga-svg-24" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                <path d="m9 12 2 2 4-4"></path>
+              </svg>
+            </div>
             <h2>Select a Support Case</h2>
             <p>Choose a case from the inbox to inspect evidence, review full details, update triage status, and message the reporter directly.</p>
           </div>
 
           <div id="detailBody" class="tga-detail-body is-hidden">
-            <!-- Case Summary Header -->
+            <!-- Compact Case Summary Header -->
             <div class="tga-glass-card tga-case-header-card">
               <div class="tga-case-top-row">
                 <div class="tga-case-badges">
-                  <span id="detailCaseCode" class="gm-case-code-pill"></span>
+                  <button type="button" id="detailCaseCodeBtn" class="gm-case-code-pill tga-copy-code-btn" title="Copy Case ID">
+                    <span id="detailCaseCode"></span>
+                    <svg class="tga-svg-icon tga-svg-12" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+                    </svg>
+                  </button>
                   <span id="detailStatusPill" class="gm-status-pill"></span>
                   <span id="detailPriorityPill" class="tga-priority-pill"></span>
                   <span id="detailClaimBadge" class="tga-claim-pill is-hidden"></span>
@@ -84,9 +145,17 @@
                 <span id="detailCreatedAt" class="tga-meta-muted"></span>
               </div>
 
-              <h2 id="detailSubject" class="tga-detail-subject"></h2>
+              <div class="tga-subject-row">
+                <h2 id="detailSubject" class="tga-detail-subject"></h2>
+                <button type="button" id="btnToggleCaseMeta" class="tga-meta-toggle-btn" aria-expanded="false" aria-controls="caseMetaRow">
+                  <span id="detailMetaBrief" class="tga-meta-brief-text">Case info</span>
+                  <svg class="tga-svg-icon tga-svg-14 tga-chevron-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
 
-              <div class="tga-meta-row">
+              <div id="caseMetaRow" class="tga-meta-row">
                 <span id="detailCategory" class="tga-meta-chip"></span>
                 <span id="detailReporter" class="tga-meta-chip"></span>
                 <span id="detailMember" class="tga-meta-chip is-hidden"></span>
@@ -94,29 +163,69 @@
               </div>
 
               <div class="tga-action-bar">
-                <button type="button" id="btnClaimCase" class="tga-btn tga-btn-secondary">Claim Case</button>
-                <button type="button" id="btnOpenStatusModal" class="tga-btn tga-btn-secondary">Update Status</button>
-                <button type="button" id="btnDeleteCase" class="tga-btn tga-btn-danger is-hidden">Delete Case</button>
+                <button type="button" id="btnClaimCase" class="tga-btn tga-btn-secondary tga-btn-sm">
+                  <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <polyline points="16 11 18 13 22 9"></polyline>
+                  </svg>
+                  <span id="btnClaimCaseLabel">Claim</span>
+                </button>
+                <button type="button" id="btnOpenStatusModal" class="tga-btn tga-btn-secondary tga-btn-sm">
+                  <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="21" x2="14" y1="4" y2="4"></line>
+                    <line x1="10" x2="3" y1="4" y2="4"></line>
+                    <line x1="21" x2="12" y1="12" y2="12"></line>
+                    <line x1="8" x2="3" y1="12" y2="12"></line>
+                    <line x1="21" x2="16" y1="20" y2="20"></line>
+                    <line x1="12" x2="3" y1="20" y2="20"></line>
+                    <line x1="14" x2="14" y1="2" y2="6"></line>
+                    <line x1="8" x2="8" y1="10" y2="14"></line>
+                    <line x1="16" x2="16" y1="18" y2="22"></line>
+                  </svg>
+                  <span>Status</span>
+                </button>
+                <button type="button" id="btnDeleteCase" class="tga-btn tga-btn-danger tga-btn-sm is-hidden">
+                  <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18"></path>
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                  </svg>
+                  <span>Delete</span>
+                </button>
               </div>
             </div>
 
             <!-- Section Tabs (Chat / Evidence / Details) -->
             <div class="gm-support-tabs tga-detail-tabs" role="tablist" aria-label="Case views">
               <button type="button" class="gm-support-tab active" data-tab="chat" role="tab" aria-selected="true">
+                <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
                 <span>Chat</span>
                 <span id="tabBadgeChat" class="gm-tab-badge">0</span>
               </button>
               <button type="button" class="gm-support-tab" data-tab="evidence" role="tab" aria-selected="false">
+                <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path>
+                  <path d="M14 2v4a2 2 0 0 0 2 2h4"></path>
+                </svg>
                 <span>Evidence</span>
                 <span id="tabBadgeEvidence" class="gm-tab-badge">0</span>
               </button>
               <button type="button" class="gm-support-tab" data-tab="details" role="tab" aria-selected="false">
-                <span>Details &amp; Audit</span>
+                <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 16v-4"></path>
+                  <path d="M12 8h.01"></path>
+                  <circle cx="12" cy="12" r="10"></circle>
+                </svg>
+                <span class="tga-tab-label-long">Details &amp; Audit</span>
+                <span class="tga-tab-label-short">Details</span>
               </button>
             </div>
 
-            <!-- Tab 1: Reporter Chat -->
-            <div id="tabPanelChat" class="tga-tab-panel active">
+            <!-- Tab 1: Reporter Chat (Flexes to fill viewport with pinned composer) -->
+            <div id="tabPanelChat" class="tga-tab-panel tga-tab-panel-chat active">
               <div class="gm-chat-card tga-chat-card">
                 <div class="gm-chat-header">
                   <div class="gm-chat-title-group">
@@ -131,25 +240,41 @@
                 <form id="adminChatForm" class="gm-chat-composer">
                   <div id="adminAttachPreview" class="gm-chat-attach-preview is-hidden">
                     <span id="adminAttachName" class="gm-chat-attach-name"></span>
-                    <button type="button" id="btnRemoveAttach" class="gm-chat-attach-remove" aria-label="Remove attachment">✕</button>
+                    <button type="button" id="btnRemoveAttach" class="gm-chat-attach-remove" aria-label="Remove attachment">
+                      <svg class="tga-svg-icon tga-svg-14" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M18 6 6 18"></path>
+                        <path d="m6 6 12 12"></path>
+                      </svg>
+                    </button>
                   </div>
                   <div class="tga-composer-row">
                     <input type="file" id="adminFileInput" class="tga-sr-only" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.log,.mp4,.webm,.mp3,.zip">
-                    <button type="button" id="btnPickAttach" class="gm-chat-file-btn" title="Attach evidence file (up to 20 MB)" aria-label="Attach file">📎</button>
+                    <button type="button" id="btnPickAttach" class="gm-chat-file-btn" title="Attach evidence file (up to 20 MB)" aria-label="Attach file">
+                      <svg class="tga-svg-icon tga-svg-18" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                      </svg>
+                    </button>
+                    <label class="tga-sr-only" for="adminReplyInput">Message to reporter</label>
                     <textarea id="adminReplyInput" class="gm-chat-input tga-chat-textarea" rows="1" maxlength="10000" placeholder="Write a message to the reporter..."></textarea>
-                    <button type="submit" id="btnSendReply" class="tga-btn tga-btn-primary tga-send-btn">Send</button>
+                    <button type="submit" id="btnSendReply" class="tga-btn tga-btn-primary tga-send-btn">
+                      <svg class="tga-svg-icon tga-svg-15" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m22 2-7 20-4-9-9-4Z"></path>
+                        <path d="M22 2 11 13"></path>
+                      </svg>
+                      <span>Send</span>
+                    </button>
                   </div>
                 </form>
               </div>
             </div>
 
             <!-- Tab 2: Evidence Vault Inspector -->
-            <div id="tabPanelEvidence" class="tga-tab-panel">
+            <div id="tabPanelEvidence" class="tga-tab-panel tga-tab-panel-scroll">
               <div id="evidenceGrid" class="tga-evidence-grid"></div>
             </div>
 
             <!-- Tab 3: Description, Resolution Note & Audit Timeline -->
-            <div id="tabPanelDetails" class="tga-tab-panel">
+            <div id="tabPanelDetails" class="tga-tab-panel tga-tab-panel-scroll">
               <div class="tga-glass-card tga-section-card">
                 <h3 class="tga-section-heading">Full Report Description</h3>
                 <pre id="detailDescription" class="tga-description-pre"></pre>
@@ -172,13 +297,18 @@
     <div id="toastBanner" class="tga-toast is-hidden" role="status" aria-live="polite"></div>
 
     <!-- Evidence Preview Modal -->
-    <dialog id="evidenceDialog" class="tga-dialog tga-dialog-wide">
+    <dialog id="evidenceDialog" class="tga-dialog tga-dialog-wide" closedby="any" aria-labelledby="evDialogTitle">
       <div class="tga-dialog-head">
         <div class="tga-dialog-title-wrap">
           <h3 id="evDialogTitle" class="tga-dialog-title">Evidence Preview</h3>
           <span id="evDialogMeta" class="tga-dialog-sub"></span>
         </div>
-        <button type="button" id="btnCloseEvDialog" class="tga-icon-btn" aria-label="Close preview">✕</button>
+        <button type="button" id="btnCloseEvDialog" class="tga-icon-btn" aria-label="Close preview" title="Close preview">
+          <svg class="tga-svg-icon tga-svg-16" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18"></path>
+            <path d="m6 6 12 12"></path>
+          </svg>
+        </button>
       </div>
       <div id="evDialogStage" class="tga-ev-stage"></div>
       <div class="tga-dialog-foot">
@@ -188,11 +318,16 @@
     </dialog>
 
     <!-- Status Update Modal -->
-    <dialog id="statusDialog" class="tga-dialog">
-      <form id="statusForm" method="dialog">
+    <dialog id="statusDialog" class="tga-dialog" closedby="any" aria-labelledby="statusDialogTitle">
+      <form id="statusForm" method="dialog" class="tga-dialog-form">
         <div class="tga-dialog-head">
-          <h3 class="tga-dialog-title">Update Case Status</h3>
-          <button type="button" id="btnCloseStatusDialog" class="tga-icon-btn" aria-label="Close">✕</button>
+          <h3 id="statusDialogTitle" class="tga-dialog-title">Update Case Status</h3>
+          <button type="button" id="btnCloseStatusDialog" class="tga-icon-btn" aria-label="Close" title="Close">
+            <svg class="tga-svg-icon tga-svg-16" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
         </div>
         <div class="tga-dialog-body">
           <label class="tga-field-label" for="statusSelect">New Status</label>
@@ -203,7 +338,7 @@
             <option value="REJECTED">Dismissed / Rejected</option>
           </select>
           <label class="tga-field-label" for="resolutionNoteInput">Resolution Note (Optional — visible on portal)</label>
-          <textarea id="resolutionNoteInput" class="tga-input" rows="3" maxlength="1000" placeholder="Summary for the reporter and audit log..."></textarea>
+          <textarea id="resolutionNoteInput" class="tga-input tga-dialog-textarea" rows="3" maxlength="1000" placeholder="Summary for the reporter and audit log..."></textarea>
         </div>
         <div class="tga-dialog-foot">
           <button type="button" id="btnCancelStatus" class="tga-btn tga-btn-secondary">Cancel</button>
@@ -213,16 +348,21 @@
     </dialog>
 
     <!-- Super Admin Delete Case Confirmation Modal -->
-    <dialog id="deleteDialog" class="tga-dialog">
+    <dialog id="deleteDialog" class="tga-dialog" closedby="any" aria-labelledby="deleteDialogTitle">
       <div class="tga-dialog-head">
-        <h3 class="tga-dialog-title">Delete Case Permanently</h3>
-        <button type="button" id="btnCloseDeleteDialog" class="tga-icon-btn" aria-label="Close">✕</button>
+        <h3 id="deleteDialogTitle" class="tga-dialog-title">Delete Case Permanently</h3>
+        <button type="button" id="btnCloseDeleteDialog" class="tga-icon-btn" aria-label="Close" title="Close">
+          <svg class="tga-svg-icon tga-svg-16" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18"></path>
+            <path d="m6 6 12 12"></path>
+          </svg>
+        </button>
       </div>
       <div class="tga-dialog-body">
         <p id="deleteConfirmText" class="tga-delete-copy"></p>
       </div>
       <div class="tga-dialog-foot">
-        <button type="button" id="btnCancelDelete" class="tga-btn tga-btn-secondary">Cancel</button>
+        <button type="button" id="btnCancelDelete" class="tga-btn tga-btn-secondary" autofocus>Cancel</button>
         <button type="button" id="btnConfirmDelete" class="tga-btn tga-btn-danger">Permanently Delete</button>
       </div>
     </dialog>
