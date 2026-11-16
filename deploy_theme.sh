@@ -652,8 +652,15 @@ if os.path.isfile(config_path):
         print(f"  Note: Database sync skipped ({e})")
 PYEOF
 
-# 6. Configure Nginx Reverse Proxy, Route-Aware CSP & Security Headers
-echo -e "${BLUE}[6/8] Configuring Nginx /api/support/ proxy, route-aware CSP & security headers...${NC}"
+# 6. Install Telegram Admin Mini App Static Assets & Configure Nginx Security Headers
+echo -e "${BLUE}[6/8] Installing Case Console WebApp (/tg-admin/) & configuring Nginx security headers...${NC}"
+sudo mkdir -p "$GHOST_DIR/tg-admin"
+sudo chmod 755 "$GHOST_DIR/tg-admin"
+fetch_verified_asset "tg-admin/index.html" "$GHOST_DIR/tg-admin/index.html" "text"
+fetch_verified_asset "tg-admin/app.css" "$GHOST_DIR/tg-admin/app.css" "text"
+fetch_verified_asset "tg-admin/app.js" "$GHOST_DIR/tg-admin/app.js" "text"
+sudo chmod 644 "$GHOST_DIR/tg-admin/index.html" "$GHOST_DIR/tg-admin/app.css" "$GHOST_DIR/tg-admin/app.js"
+
 sudo \
     GHOST_CSP_MODE="${GHOST_CSP_MODE:-report-only}" \
     GHOST_COOP_MODE="${GHOST_COOP_MODE:-enforce}" \
@@ -808,6 +815,25 @@ proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
         client_max_body_size 50M;
     }"""
 
+tg_admin_block = """    # Telegram Admin Support Case Console Mini App (zero secrets in static shell)
+    location = /tg-admin {
+        return 301 /tg-admin/$is_args$args;
+    }
+
+    location ^~ /tg-admin/ {
+        root /var/www/ghost;
+        index index.html;
+        try_files $uri $uri/ =404;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+        add_header Content-Security-Policy "default-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'self' https://web.telegram.org; script-src 'self' https://telegram.org; style-src 'self' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' blob:; upgrade-insecure-requests" always;
+        add_header Cross-Origin-Opener-Policy "same-origin-allow-popups" always;
+        add_header Cross-Origin-Resource-Policy "cross-origin" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Permitted-Cross-Domain-Policies "none" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Cache-Control "no-store" always;
+    }"""
+
 def find_matching_brace(text: str, open_idx: int) -> int:
     depth = 0
     in_quote = None
@@ -862,6 +888,24 @@ def patch_vhost_text(content: str) -> str:
             close_idx = find_matching_brace(out, brace_idx)
             if close_idx != -1 and "2368" in out[brace_idx:close_idx + 1]:
                 out = out[:m.start()] + proxy_block + "\n\n" + out[m.start():]
+
+    # 1b. Ensure or upgrade location = /tg-admin + location ^~ /tg-admin/
+    tg_matches = list(re.finditer(r"(^[ \t]*#[^\n]*Telegram Admin Support Case Console[^\n]*\n)?(?:[ \t]*location\s+=\s+/tg-admin\s*\{[^}]*\}\s*)?[ \t]*location\s+(?:\^~\s+)?/tg-admin/\s*\{", out, flags=re.M))
+    if tg_matches:
+        for m in reversed(tg_matches):
+            brace_idx = out.find("{", m.end() - 1)
+            close_idx = find_matching_brace(out, brace_idx)
+            if close_idx != -1:
+                block_slice = out[m.start():close_idx + 1]
+                if "location = /tg-admin" not in block_slice or "root /var/www/ghost;" not in block_slice or "https://web.telegram.org" not in block_slice:
+                    out = out[:m.start()] + tg_admin_block + out[close_idx + 1:]
+    else:
+        loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
+        for m in reversed(loc_matches):
+            brace_idx = out.find("{", m.start())
+            close_idx = find_matching_brace(out, brace_idx)
+            if close_idx != -1 and "2368" in out[brace_idx:close_idx + 1]:
+                out = out[:m.start()] + tg_admin_block + "\n\n" + out[m.start():]
 
     # 2. Inject snippets/ghost-security-headers.conf inside location / blocks proxying to 2368
     loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
@@ -1024,6 +1068,12 @@ for sdir in "${SYNC_DIRS[@]}"; do
     fetch_verified_asset "bot.py" "$sdir/bot.py" "py"
     fetch_verified_asset "ghost_manager.py" "$sdir/ghost_manager.py" "py"
     fetch_verified_asset "requirements.txt" "$sdir/requirements.txt" "text"
+    sudo mkdir -p "$sdir/tg-admin"
+    sudo chmod 755 "$sdir/tg-admin"
+    fetch_verified_asset "tg-admin/index.html" "$sdir/tg-admin/index.html" "text"
+    fetch_verified_asset "tg-admin/app.css" "$sdir/tg-admin/app.css" "text"
+    fetch_verified_asset "tg-admin/app.js" "$sdir/tg-admin/app.js" "text"
+    sudo chmod 644 "$sdir/tg-admin/index.html" "$sdir/tg-admin/app.css" "$sdir/tg-admin/app.js"
 
     if [ ! -d "$sdir/venv" ]; then
         sudo python3 -m venv "$sdir/venv" 2>/dev/null || true

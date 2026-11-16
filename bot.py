@@ -73,6 +73,9 @@ try:
         Update,
         InlineKeyboardButton,
         InlineKeyboardMarkup,
+        WebAppInfo,
+        MenuButtonWebApp,
+        MenuButtonDefault,
     )
     from telegram.constants import ParseMode
     from telegram.ext import (
@@ -90,6 +93,9 @@ except (ImportError, ModuleNotFoundError):
     Update = Any  # type: ignore
     InlineKeyboardButton = Any  # type: ignore
     InlineKeyboardMarkup = Any  # type: ignore
+    WebAppInfo = Any  # type: ignore
+    MenuButtonWebApp = Any  # type: ignore
+    MenuButtonDefault = Any  # type: ignore
     class ParseMode:  # type: ignore
         HTML = "HTML"
         MARKDOWN = "Markdown"
@@ -312,8 +318,55 @@ def _update_env_file(key_values: dict, env_path: str = None):
         pass
 
 
+def _resolve_webapp_url() -> str:
+    """Resolve the HTTPS Support Case Console Mini App URL."""
+    explicit = (os.getenv("SUPPORT_WEBAPP_URL") or "").strip().rstrip("/")
+    if explicit:
+        return f"{explicit}/"
+    for cfg_name in ("config.production.json", "config.development.json"):
+        for base_dir in (GHOST_DIR, "/var/www/ghost"):
+            cfg_path = os.path.join(base_dir, cfg_name)
+            if os.path.isfile(cfg_path):
+                try:
+                    import json as _json
+                    with open(cfg_path, "r", encoding="utf-8") as fp:
+                        cfg = _json.load(fp)
+                    raw_url = str(cfg.get("url") or "").strip().rstrip("/")
+                    if raw_url:
+                        return f"{raw_url}/tg-admin/"
+                except Exception:
+                    pass
+    return ""
+
+
+async def _sync_admin_menu_button(bot_client, user_id: int, enabled: bool):
+    """Best-effort set per-admin Chat Menu Button so only authorized admins see the Case Console WebApp."""
+    if not HAS_TELEGRAM or not bot_client or int(user_id) <= 0:
+        return
+    try:
+        wurl = _resolve_webapp_url()
+        if enabled and wurl.startswith("https://"):
+            await bot_client.set_chat_menu_button(
+                chat_id=int(user_id),
+                menu_button=MenuButtonWebApp(text="Cases", web_app=WebAppInfo(url=wurl)),
+            )
+        else:
+            await bot_client.set_chat_menu_button(
+                chat_id=int(user_id),
+                menu_button=MenuButtonDefault(),
+            )
+    except Exception:
+        pass
+
+
 def get_main_menu_keyboard():
     """Build the full interactive inline keyboard (Super Admin Only)."""
+    wurl = _resolve_webapp_url()
+    cases_btn = (
+        InlineKeyboardButton("🖥️ Case Console", web_app=WebAppInfo(url=wurl))
+        if (HAS_TELEGRAM and wurl.startswith("https://"))
+        else InlineKeyboardButton("🛡️ Support Cases", callback_data="menu_cases_list")
+    )
     keyboard = [
         [
             InlineKeyboardButton("📦 Create Backup", callback_data="menu_backup"),
@@ -324,7 +377,7 @@ def get_main_menu_keyboard():
             InlineKeyboardButton("📊 Ghost Status", callback_data="menu_status"),
         ],
         [
-            InlineKeyboardButton("🛡️ Support Cases", callback_data="menu_cases_list"),
+            cases_btn,
             InlineKeyboardButton("📑 List Backups", callback_data="menu_backups_list"),
         ],
         [
@@ -337,8 +390,15 @@ def get_main_menu_keyboard():
 
 def get_support_admin_menu_keyboard():
     """Build the restricted inline keyboard for Normal Admins (Support Cases Only)."""
+    wurl = _resolve_webapp_url()
+    cases_btn = (
+        InlineKeyboardButton("🖥️ Open Case Console", web_app=WebAppInfo(url=wurl))
+        if (HAS_TELEGRAM and wurl.startswith("https://"))
+        else InlineKeyboardButton("🛡️ Support Cases", callback_data="menu_cases_list")
+    )
     keyboard = [
-        [InlineKeyboardButton("🛡️ Support Cases", callback_data="menu_cases_list")],
+        [cases_btn],
+        [InlineKeyboardButton("📋 Case List", callback_data="menu_cases_list")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="menu_help")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -421,11 +481,35 @@ async def require_super_admin(update: Update) -> bool:
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start and /menu commands."""
+    """Handle /start and /menu commands (including case deep-links from Ops Group alerts)."""
     user = update.effective_user
     if not user or not is_authorized(user.id):
         await send_unauthorized(update)
         return
+
+    await _sync_admin_menu_button(context.bot, user.id, enabled=True)
+
+    if context.args:
+        arg0 = str(context.args[0] or "").strip()
+        if arg0.startswith("open_") and update.effective_chat and int(update.effective_chat.id) > 0:
+            raw_target = arg0[5:].strip()
+            wurl = _resolve_webapp_url().rstrip("/")
+            if raw_target.lower() == "inbox":
+                target_url = f"{wurl}/" if wurl else ""
+                label = "🖥️ Open Support Case Console"
+                msg_text = "🛡️ *Support Case Console*\n\nTap below to launch the secure Mini App:"
+            else:
+                safe_code = re.sub(r"[^A-Za-z0-9-]", "", raw_target).upper()
+                target_url = f"{wurl}/?case={safe_code}" if (wurl and safe_code) else ""
+                label = f"🖥️ Open Case #{safe_code}" if safe_code else "🖥️ Open Case Console"
+                msg_text = f"🛡️ *Case `{md_code(safe_code)}`*\n\nTap below to review chat & evidence inside the Case Console:"
+            if target_url.startswith("https://"):
+                await update.message.reply_text(
+                    msg_text,
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(label, web_app=WebAppInfo(url=target_url))]]),
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
 
     welcome_text, markup = _build_role_menu(user)
     await update.message.reply_text(
@@ -819,17 +903,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Select a case below:"
         )
         keyboard = []
+        chat_id_for_menu = update.effective_chat.id if update.effective_chat else user.id
+        if support_api_server and support_api_server.bridge:
+            inbox_btn = support_api_server.bridge.make_open_webapp_button("🖥️ Open Case Console", chat_id_for_menu)
+            if inbox_btn:
+                keyboard.append([inbox_btn])
         for c in cases:
             c_status = str(c.get("status") or "SUBMITTED").upper()
             status_tag = "🟡" if c_status == "SUBMITTED" else ("🟠" if c_status == "IN_REVIEW" else "🟢")
             c_subj = str(c.get("subject") or "Untitled")[:22]
             c_code = str(c.get("case_code") or "CASE")
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"{status_tag} #{c_code} - {c_subj}",
-                    callback_data=f"case_view:{c_code}"
+            c_btn = (
+                support_api_server.bridge.make_open_webapp_button(
+                    f"{status_tag} #{c_code} - {c_subj}", chat_id_for_menu, case_code=c_code
                 )
-            ])
+                if (support_api_server and support_api_server.bridge)
+                else InlineKeyboardButton(f"{status_tag} #{c_code} - {c_subj}", callback_data=f"case_view:{c_code}")
+            )
+            if c_btn:
+                keyboard.append([c_btn])
         keyboard.append([InlineKeyboardButton("⬅️ Back to Menu", callback_data="main_menu")])
         try:
             await query.edit_message_text(
@@ -1415,6 +1507,7 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _update_env_file({"ALLOWED_USER_IDS": ",".join(str(x) for x in ALLOWED_USER_IDS)})
     if support_api_server and support_api_server.bridge:
         support_api_server.bridge.allowed_user_ids = _effective_allowed_user_ids()
+    await _sync_admin_menu_button(context.bot, target_uid, enabled=True)
 
     await update.message.reply_text(
         f"✅ Added `{target_uid}` to support admins.",
@@ -1456,6 +1549,7 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if support_api_server and support_api_server.bridge:
         support_api_server.bridge.allowed_user_ids = _effective_allowed_user_ids()
         support_api_server.bridge.active_reply_sessions.pop(target_uid, None)
+    await _sync_admin_menu_button(context.bot, target_uid, enabled=False)
 
     await update.message.reply_text(
         f"✅ Removed `{target_uid}` from support admins.",
@@ -1862,6 +1956,13 @@ async def post_init(application: Application):
     """Start Support Hub API server and register bot bridge on the asyncio event loop."""
     global support_api_server
     try:
+        bot_username = ""
+        try:
+            me = await application.bot.get_me()
+            bot_username = getattr(me, "username", "") or ""
+        except Exception:
+            pass
+
         support_api_server = init_support_hub(
             application=application,
             ghost_dir=GHOST_DIR,
@@ -1873,8 +1974,12 @@ async def post_init(application: Application):
             super_admin_callback=is_super_admin,
             ops_group_chat_id=EFFECTIVE_OPS_CHAT_ID,
             storage_chat_id=STORAGE_CHAT_ID,
+            webapp_url=_resolve_webapp_url() or None,
+            bot_username=bot_username or None,
         )
         await support_api_server.start()
+        for uid in _effective_allowed_user_ids():
+            await _sync_admin_menu_button(application.bot, uid, enabled=True)
         logger.info(f"Support REST API daemon listening on http://{SUPPORT_HOST}:{SUPPORT_PORT}")
     except Exception as e:
         logger.error(f"Failed to start Support API server: {e}")

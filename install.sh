@@ -135,9 +135,15 @@ elif [ ! -f "$INSTALL_DIR/bot.py" ]; then
   fi
 fi
 
-# Ensure backups and support vault directories exist with strict 0700 permissions
+# Ensure backups, Case Console WebApp assets, and support vault directories exist
 mkdir -p "$GHOST_DIR/backups"
 mkdir -p "$GHOST_DIR/support_vault/evidence"
+mkdir -p "$GHOST_DIR/tg-admin"
+if [ -d "$INSTALL_DIR/tg-admin" ]; then
+  cp -f "$INSTALL_DIR/tg-admin/"* "$GHOST_DIR/tg-admin/" 2>/dev/null || true
+fi
+chmod 755 "$GHOST_DIR/tg-admin" 2>/dev/null || true
+chmod 644 "$GHOST_DIR/tg-admin/"* 2>/dev/null || true
 chown -R root:root "$GHOST_DIR/support_vault" 2>/dev/null || true
 chmod 700 "$GHOST_DIR/backups" "$GHOST_DIR/support_vault" "$GHOST_DIR/support_vault/evidence" 2>/dev/null || true
 find "$GHOST_DIR/support_vault" -type f -exec chmod 600 {} + 2>/dev/null || true
@@ -355,6 +361,25 @@ proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
         client_max_body_size 50M;
     }"""
 
+tg_admin_block = """    # Telegram Admin Support Case Console Mini App (zero secrets in static shell)
+    location = /tg-admin {
+        return 301 /tg-admin/$is_args$args;
+    }
+
+    location ^~ /tg-admin/ {
+        root /var/www/ghost;
+        index index.html;
+        try_files $uri $uri/ =404;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+        add_header Content-Security-Policy "default-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'self' https://web.telegram.org; script-src 'self' https://telegram.org; style-src 'self' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' blob:; upgrade-insecure-requests" always;
+        add_header Cross-Origin-Opener-Policy "same-origin-allow-popups" always;
+        add_header Cross-Origin-Resource-Policy "cross-origin" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Permitted-Cross-Domain-Policies "none" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Cache-Control "no-store" always;
+    }"""
+
 def find_matching_brace(text: str, open_idx: int) -> int:
     depth = 0
     in_quote = None
@@ -408,6 +433,23 @@ def patch_vhost_text(content: str) -> str:
             close_idx = find_matching_brace(out, brace_idx)
             if close_idx != -1 and "2368" in out[brace_idx:close_idx + 1]:
                 out = out[:m.start()] + proxy_block + "\n\n" + out[m.start():]
+
+    tg_matches = list(re.finditer(r"(^[ \t]*#[^\n]*Telegram Admin Support Case Console[^\n]*\n)?(?:[ \t]*location\s+=\s+/tg-admin\s*\{[^}]*\}\s*)?[ \t]*location\s+(?:\^~\s+)?/tg-admin/\s*\{", out, flags=re.M))
+    if tg_matches:
+        for m in reversed(tg_matches):
+            brace_idx = out.find("{", m.end() - 1)
+            close_idx = find_matching_brace(out, brace_idx)
+            if close_idx != -1:
+                block_slice = out[m.start():close_idx + 1]
+                if "location = /tg-admin" not in block_slice or "root /var/www/ghost;" not in block_slice or "https://web.telegram.org" not in block_slice:
+                    out = out[:m.start()] + tg_admin_block + out[close_idx + 1:]
+    else:
+        loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
+        for m in reversed(loc_matches):
+            brace_idx = out.find("{", m.start())
+            close_idx = find_matching_brace(out, brace_idx)
+            if close_idx != -1 and "2368" in out[brace_idx:close_idx + 1]:
+                out = out[:m.start()] + tg_admin_block + "\n\n" + out[m.start():]
 
     loc_matches = list(re.finditer(r"^[ \t]*location\s+/\s*\{", out, flags=re.M))
     for m in reversed(loc_matches):

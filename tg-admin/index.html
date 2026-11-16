@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en" class="dark-mode" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>Support Case Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap">
+  <link rel="stylesheet" href="./app.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div id="appRoot" class="tga-shell">
+    <!-- Fail-Closed Authentication Gate (Default View Until initData Verified) -->
+    <main id="gateView" class="tga-gate-wrap" aria-live="polite">
+      <section class="tga-glass-card tga-gate-card">
+        <div id="gateSpinner" class="tga-spinner" aria-hidden="true"></div>
+        <div id="gateLockBadge" class="tga-lock-badge is-hidden" aria-hidden="true">🔒</div>
+        <h1 id="gateTitle" class="tga-gate-title">Verifying Admin Session</h1>
+        <p id="gateMessage" class="tga-gate-desc">Checking Telegram cryptographic credentials...</p>
+        <div id="gateActions" class="tga-gate-actions is-hidden">
+          <button type="button" id="btnRetryAuth" class="tga-btn tga-btn-primary">Retry Verification</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Authenticated Support Case Console (Rendered Only After Verification) -->
+    <div id="consoleView" class="tga-console is-hidden" data-mobile-view="inbox">
+      <header class="tga-topbar">
+        <div class="tga-topbar-left">
+          <button type="button" id="btnMobileBack" class="tga-icon-btn tga-mobile-only" aria-label="Back to inbox">←</button>
+          <span class="gm-live-dot" aria-hidden="true"></span>
+          <span class="tga-brand-title">Support Console</span>
+          <span id="adminRoleBadge" class="tga-role-pill">Admin</span>
+        </div>
+        <div class="tga-topbar-right">
+          <span id="adminIdentityLabel" class="tga-admin-name"></span>
+          <button type="button" id="btnRefreshAll" class="tga-icon-btn" title="Refresh cases" aria-label="Refresh cases">↻</button>
+          <button type="button" id="btnThemeToggle" class="tga-icon-btn" title="Toggle light or dark theme" aria-label="Toggle theme">◐</button>
+        </div>
+      </header>
+
+      <div class="tga-workspace">
+        <!-- Left Pane: Case Inbox -->
+        <aside id="inboxPane" class="tga-inbox-pane" aria-label="Support cases inbox">
+          <div class="tga-inbox-controls">
+            <label class="tga-sr-only" for="caseSearchInput">Search cases</label>
+            <input type="search" id="caseSearchInput" class="tga-input tga-search-input" placeholder="Search #CASE, subject, reporter..." autocomplete="off">
+            <div id="statusFilterBar" class="tga-filter-pills" role="tablist" aria-label="Filter cases by status">
+              <button type="button" class="tga-filter-pill active" data-status="ALL" role="tab" aria-selected="true">All <span class="tga-count-pill" id="cntAll">0</span></button>
+              <button type="button" class="tga-filter-pill" data-status="UNREAD" role="tab" aria-selected="false">Unread <span class="tga-count-pill tga-count-unread" id="cntUnread">0</span></button>
+              <button type="button" class="tga-filter-pill" data-status="SUBMITTED" role="tab" aria-selected="false">New <span class="tga-count-pill" id="cntSubmitted">0</span></button>
+              <button type="button" class="tga-filter-pill" data-status="IN_REVIEW" role="tab" aria-selected="false">In Progress <span class="tga-count-pill" id="cntReview">0</span></button>
+              <button type="button" class="tga-filter-pill" data-status="CLOSED" role="tab" aria-selected="false">Resolved <span class="tga-count-pill" id="cntClosed">0</span></button>
+              <button type="button" class="tga-filter-pill" data-status="REJECTED" role="tab" aria-selected="false">Dismissed <span class="tga-count-pill" id="cntRejected">0</span></button>
+            </div>
+          </div>
+
+          <div id="inboxList" class="tga-inbox-list" role="list"></div>
+        </aside>
+
+        <!-- Right Pane: Case Inspector & Chat -->
+        <section id="detailPane" class="tga-detail-pane" aria-label="Case details">
+          <div id="detailEmpty" class="tga-glass-card tga-empty-detail">
+            <div class="tga-empty-icon">🛡️</div>
+            <h2>Select a Support Case</h2>
+            <p>Choose a case from the inbox to inspect evidence, review full details, update triage status, and message the reporter directly.</p>
+          </div>
+
+          <div id="detailBody" class="tga-detail-body is-hidden">
+            <!-- Case Summary Header -->
+            <div class="tga-glass-card tga-case-header-card">
+              <div class="tga-case-top-row">
+                <div class="tga-case-badges">
+                  <span id="detailCaseCode" class="gm-case-code-pill"></span>
+                  <span id="detailStatusPill" class="gm-status-pill"></span>
+                  <span id="detailPriorityPill" class="tga-priority-pill"></span>
+                  <span id="detailClaimBadge" class="tga-claim-pill is-hidden"></span>
+                </div>
+                <span id="detailCreatedAt" class="tga-meta-muted"></span>
+              </div>
+
+              <h2 id="detailSubject" class="tga-detail-subject"></h2>
+
+              <div class="tga-meta-row">
+                <span id="detailCategory" class="tga-meta-chip"></span>
+                <span id="detailReporter" class="tga-meta-chip"></span>
+                <span id="detailMember" class="tga-meta-chip is-hidden"></span>
+                <span id="detailContact" class="tga-meta-chip is-hidden"></span>
+              </div>
+
+              <div class="tga-action-bar">
+                <button type="button" id="btnClaimCase" class="tga-btn tga-btn-secondary">Claim Case</button>
+                <button type="button" id="btnOpenStatusModal" class="tga-btn tga-btn-secondary">Update Status</button>
+                <button type="button" id="btnDeleteCase" class="tga-btn tga-btn-danger is-hidden">Delete Case</button>
+              </div>
+            </div>
+
+            <!-- Section Tabs (Chat / Evidence / Details) -->
+            <div class="gm-support-tabs tga-detail-tabs" role="tablist" aria-label="Case views">
+              <button type="button" class="gm-support-tab active" data-tab="chat" role="tab" aria-selected="true">
+                <span>Chat</span>
+                <span id="tabBadgeChat" class="gm-tab-badge">0</span>
+              </button>
+              <button type="button" class="gm-support-tab" data-tab="evidence" role="tab" aria-selected="false">
+                <span>Evidence</span>
+                <span id="tabBadgeEvidence" class="gm-tab-badge">0</span>
+              </button>
+              <button type="button" class="gm-support-tab" data-tab="details" role="tab" aria-selected="false">
+                <span>Details &amp; Audit</span>
+              </button>
+            </div>
+
+            <!-- Tab 1: Reporter Chat -->
+            <div id="tabPanelChat" class="tga-tab-panel active">
+              <div class="gm-chat-card tga-chat-card">
+                <div class="gm-chat-header">
+                  <div class="gm-chat-title-group">
+                    <span class="gm-live-dot" aria-hidden="true"></span>
+                    <span class="gm-chat-title">Reporter Thread</span>
+                  </div>
+                  <span id="chatPollStatus" class="gm-chat-status">Live sync active</span>
+                </div>
+
+                <div id="chatMessages" class="gm-chat-messages tga-chat-messages"></div>
+
+                <form id="adminChatForm" class="gm-chat-composer">
+                  <div id="adminAttachPreview" class="gm-chat-attach-preview is-hidden">
+                    <span id="adminAttachName" class="gm-chat-attach-name"></span>
+                    <button type="button" id="btnRemoveAttach" class="gm-chat-attach-remove" aria-label="Remove attachment">✕</button>
+                  </div>
+                  <div class="tga-composer-row">
+                    <input type="file" id="adminFileInput" class="tga-sr-only" accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.log,.mp4,.webm,.mp3,.zip">
+                    <button type="button" id="btnPickAttach" class="gm-chat-file-btn" title="Attach evidence file (up to 20 MB)" aria-label="Attach file">📎</button>
+                    <textarea id="adminReplyInput" class="gm-chat-input tga-chat-textarea" rows="1" maxlength="10000" placeholder="Write a message to the reporter..."></textarea>
+                    <button type="submit" id="btnSendReply" class="tga-btn tga-btn-primary tga-send-btn">Send</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <!-- Tab 2: Evidence Vault Inspector -->
+            <div id="tabPanelEvidence" class="tga-tab-panel">
+              <div id="evidenceGrid" class="tga-evidence-grid"></div>
+            </div>
+
+            <!-- Tab 3: Description, Resolution Note & Audit Timeline -->
+            <div id="tabPanelDetails" class="tga-tab-panel">
+              <div class="tga-glass-card tga-section-card">
+                <h3 class="tga-section-heading">Full Report Description</h3>
+                <pre id="detailDescription" class="tga-description-pre"></pre>
+              </div>
+              <div id="detailResolutionCard" class="tga-glass-card tga-section-card is-hidden">
+                <h3 class="tga-section-heading">Resolution Note</h3>
+                <p id="detailResolutionNote" class="tga-resolution-copy"></p>
+              </div>
+              <div class="tga-glass-card tga-section-card">
+                <h3 class="tga-section-heading">Audit Trail</h3>
+                <ul id="detailAuditList" class="tga-audit-list"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Non-Blocking Toast Banner -->
+    <div id="toastBanner" class="tga-toast is-hidden" role="status" aria-live="polite"></div>
+
+    <!-- Evidence Preview Modal -->
+    <dialog id="evidenceDialog" class="tga-dialog tga-dialog-wide">
+      <div class="tga-dialog-head">
+        <div class="tga-dialog-title-wrap">
+          <h3 id="evDialogTitle" class="tga-dialog-title">Evidence Preview</h3>
+          <span id="evDialogMeta" class="tga-dialog-sub"></span>
+        </div>
+        <button type="button" id="btnCloseEvDialog" class="tga-icon-btn" aria-label="Close preview">✕</button>
+      </div>
+      <div id="evDialogStage" class="tga-ev-stage"></div>
+      <div class="tga-dialog-foot">
+        <button type="button" id="btnEvSendDm" class="tga-btn tga-btn-secondary">Send to Bot DM</button>
+        <button type="button" id="btnEvDownload" class="tga-btn tga-btn-primary">Download File</button>
+      </div>
+    </dialog>
+
+    <!-- Status Update Modal -->
+    <dialog id="statusDialog" class="tga-dialog">
+      <form id="statusForm" method="dialog">
+        <div class="tga-dialog-head">
+          <h3 class="tga-dialog-title">Update Case Status</h3>
+          <button type="button" id="btnCloseStatusDialog" class="tga-icon-btn" aria-label="Close">✕</button>
+        </div>
+        <div class="tga-dialog-body">
+          <label class="tga-field-label" for="statusSelect">New Status</label>
+          <select id="statusSelect" class="tga-input">
+            <option value="SUBMITTED">New (Submitted)</option>
+            <option value="IN_REVIEW">In Progress (Under Review)</option>
+            <option value="CLOSED">Resolved (Closed)</option>
+            <option value="REJECTED">Dismissed / Rejected</option>
+          </select>
+          <label class="tga-field-label" for="resolutionNoteInput">Resolution Note (Optional — visible on portal)</label>
+          <textarea id="resolutionNoteInput" class="tga-input" rows="3" maxlength="1000" placeholder="Summary for the reporter and audit log..."></textarea>
+        </div>
+        <div class="tga-dialog-foot">
+          <button type="button" id="btnCancelStatus" class="tga-btn tga-btn-secondary">Cancel</button>
+          <button type="submit" id="btnConfirmStatus" class="tga-btn tga-btn-primary">Save Status</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Super Admin Delete Case Confirmation Modal -->
+    <dialog id="deleteDialog" class="tga-dialog">
+      <div class="tga-dialog-head">
+        <h3 class="tga-dialog-title">Delete Case Permanently</h3>
+        <button type="button" id="btnCloseDeleteDialog" class="tga-icon-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="tga-dialog-body">
+        <p id="deleteConfirmText" class="tga-delete-copy"></p>
+      </div>
+      <div class="tga-dialog-foot">
+        <button type="button" id="btnCancelDelete" class="tga-btn tga-btn-secondary">Cancel</button>
+        <button type="button" id="btnConfirmDelete" class="tga-btn tga-btn-danger">Permanently Delete</button>
+      </div>
+    </dialog>
+  </div>
+</body>
+</html>

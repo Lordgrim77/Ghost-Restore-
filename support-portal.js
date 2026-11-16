@@ -189,8 +189,14 @@
         }
     };
 
+    const MAX_PER_FILE_BYTES = 20 * 1024 * 1024;
+
     function addFiles(fileList) {
         for (let i = 0; i < fileList.length; i++) {
+            if (fileList[i].size > MAX_PER_FILE_BYTES) {
+                alert(`File "${fileList[i].name}" exceeds the 20 MB per-file limit.`);
+                continue;
+            }
             if (selectedFiles.length >= 10) {
                 alert('Maximum 10 attachments allowed per report.');
                 break;
@@ -745,6 +751,11 @@
 
     window.handleChatFileSelect = function (input) {
         if (input.files && input.files[0]) {
+            if (input.files[0].size > MAX_PER_FILE_BYTES) {
+                alert('Attachment exceeds the 20 MB per-file limit.');
+                input.value = '';
+                return;
+            }
             selectedChatFile = input.files[0];
             const sizeStr = (selectedChatFile.size / 1024).toFixed(1) + ' KB';
             document.getElementById('chatAttachName').textContent = `${selectedChatFile.name} (${sizeStr})`;

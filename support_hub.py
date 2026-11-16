@@ -39,6 +39,9 @@ try:
         Update,
         InlineKeyboardButton,
         InlineKeyboardMarkup,
+        WebAppInfo,
+        MenuButtonWebApp,
+        MenuButtonDefault,
     )
     from telegram.constants import ParseMode
     from telegram.ext import (
@@ -55,6 +58,9 @@ except (ImportError, ModuleNotFoundError):
     Update = Any  # type: ignore
     InlineKeyboardButton = Any  # type: ignore
     InlineKeyboardMarkup = Any  # type: ignore
+    WebAppInfo = Any  # type: ignore
+    MenuButtonWebApp = Any  # type: ignore
+    MenuButtonDefault = Any  # type: ignore
     class ParseMode:  # type: ignore
         HTML = "HTML"
         MARKDOWN = "Markdown"
@@ -67,6 +73,11 @@ except (ImportError, ModuleNotFoundError):
     filters = Any  # type: ignore
 
 logger = logging.getLogger("support-hub")
+
+
+class EvidenceTooLargeError(Exception):
+    """Raised when an evidence file exceeds Telegram Bot API getFile download limits."""
+    pass
 
 # =========================================================================
 # OpSec & Metadata Scrubbing (Pure Python, Zero External C Dependencies)
@@ -230,11 +241,22 @@ class SupportVault:
                 updated_at TEXT NOT NULL
             )
             """)
-            # Auto-migrate existing DBs for member tracking & Telegram metadata
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS admin_read_state (
+                case_code TEXT NOT NULL,
+                admin_id INTEGER NOT NULL,
+                last_read_msg_id INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (case_code, admin_id)
+            )
+            """)
+            # Auto-migrate existing DBs for member tracking, assignment, & Telegram metadata
             for col_sql in [
                 "ALTER TABLE cases ADD COLUMN member_email TEXT",
                 "ALTER TABLE cases ADD COLUMN member_uuid TEXT",
                 "ALTER TABLE cases ADD COLUMN telegram_message_id INTEGER",
+                "ALTER TABLE cases ADD COLUMN assigned_admin_id INTEGER",
+                "ALTER TABLE cases ADD COLUMN assigned_admin_name TEXT",
                 "ALTER TABLE evidence_files ADD COLUMN telegram_file_id TEXT",
                 "ALTER TABLE evidence_files ADD COLUMN telegram_message_id INTEGER",
                 "ALTER TABLE evidence_files ADD COLUMN telegram_chat_id INTEGER",
@@ -250,6 +272,7 @@ class SupportVault:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_member_uuid ON cases(member_uuid)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_tg_msg ON cases(telegram_message_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence_files(case_code)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_case_id ON messages(case_code, id)")
                 conn.commit()
             except Exception:
                 pass
@@ -684,6 +707,187 @@ class SupportVault:
             "evidence_tg_messages": tg_evidence_msgs,
         }
 
+    def list_cases_admin(
+        self,
+        status: Optional[str] = None,
+        q: Optional[str] = None,
+        limit: int = 80,
+        viewer_admin_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """List support cases across vault DBs with unread/message/evidence counts (no access_key/ip_hash)."""
+        clean_status = (status or "").strip().upper()
+        if clean_status == "ALL":
+            clean_status = ""
+        clean_q = (q or "").strip().lower()
+        seen_codes: Set[str] = set()
+        results: List[Dict[str, Any]] = []
+
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    has_read_tbl = bool(
+                        conn.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_read_state'"
+                        ).fetchone()
+                    )
+                    cols = {r[1] for r in conn.execute("PRAGMA table_info(cases)").fetchall()}
+                    has_assign = "assigned_admin_id" in cols and "assigned_admin_name" in cols
+                    assign_sel = "c.assigned_admin_id, c.assigned_admin_name" if has_assign else "NULL AS assigned_admin_id, NULL AS assigned_admin_name"
+                    read_join = (
+                        "LEFT JOIN admin_read_state r ON r.case_code = c.case_code AND r.admin_id = ?"
+                        if (has_read_tbl and viewer_admin_id)
+                        else ""
+                    )
+                    read_sel = (
+                        "COALESCE(r.last_read_msg_id, 0) AS last_read_msg_id"
+                        if (has_read_tbl and viewer_admin_id)
+                        else "0 AS last_read_msg_id"
+                    )
+                    sql = f"""
+                        SELECT
+                            c.case_code, c.category, c.priority, c.status, c.subject,
+                            c.description, c.reporter_alias, c.reporter_contact,
+                            c.member_email, c.resolution_note, c.created_at, c.updated_at,
+                            {assign_sel},
+                            {read_sel},
+                            (SELECT COUNT(*) FROM evidence_files ef WHERE ef.case_code = c.case_code) AS file_count,
+                            (SELECT COUNT(*) FROM messages m WHERE m.case_code = c.case_code) AS msg_count,
+                            (SELECT COALESCE(MAX(m.id), 0) FROM messages m WHERE m.case_code = c.case_code) AS last_msg_id,
+                            (SELECT m.sender_type FROM messages m WHERE m.case_code = c.case_code ORDER BY m.id DESC LIMIT 1) AS last_sender_type,
+                            (SELECT m.message_text FROM messages m WHERE m.case_code = c.case_code ORDER BY m.id DESC LIMIT 1) AS last_message_text
+                        FROM cases c
+                        {read_join}
+                        ORDER BY COALESCE(c.updated_at, c.created_at) DESC
+                        LIMIT ?
+                    """
+                    args: Tuple[Any, ...] = (int(viewer_admin_id), limit * 2) if (has_read_tbl and viewer_admin_id) else (limit * 2,)
+                    rows = conn.execute(sql, args).fetchall()
+                    for r in rows:
+                        d = dict(r)
+                        cc = d.get("case_code")
+                        if not cc or cc in seen_codes:
+                            continue
+                        if clean_status and str(d.get("status") or "").upper() != clean_status:
+                            continue
+                        if clean_q:
+                            hay = " ".join([
+                                str(cc),
+                                str(d.get("subject") or ""),
+                                str(d.get("category") or ""),
+                                str(d.get("reporter_alias") or ""),
+                                str(d.get("member_email") or ""),
+                                str(d.get("description") or "")[:300],
+                            ]).lower()
+                            if clean_q not in hay:
+                                continue
+                        seen_codes.add(cc)
+                        last_msg_id = int(d.get("last_msg_id") or 0)
+                        last_read_id = int(d.get("last_read_msg_id") or 0)
+                        last_sender = str(d.get("last_sender_type") or "")
+                        is_unread = (
+                            (last_msg_id > last_read_id and last_sender == "reporter")
+                            or (str(d.get("status") or "").upper() == "SUBMITTED" and last_read_id == 0 and last_msg_id == 0)
+                        )
+                        results.append({
+                            "case_code": cc,
+                            "category": d.get("category") or "Support",
+                            "priority": d.get("priority") or "STANDARD",
+                            "status": d.get("status") or "SUBMITTED",
+                            "subject": d.get("subject") or "No Subject",
+                            "description_preview": str(d.get("description") or "")[:180],
+                            "reporter_alias": d.get("reporter_alias") or "Anonymous",
+                            "has_member": bool(d.get("member_email")),
+                            "assigned_admin_id": d.get("assigned_admin_id"),
+                            "assigned_admin_name": d.get("assigned_admin_name"),
+                            "file_count": int(d.get("file_count") or 0),
+                            "msg_count": int(d.get("msg_count") or 0),
+                            "last_msg_id": last_msg_id,
+                            "last_sender_type": last_sender,
+                            "last_message_preview": str(d.get("last_message_text") or "")[:120],
+                            "unread": bool(is_unread),
+                            "created_at": d.get("created_at"),
+                            "updated_at": d.get("updated_at"),
+                        })
+            except Exception as e:
+                logger.warning("list_cases_admin query warning on %s: %s", db, e)
+        results.sort(key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""), reverse=True)
+        return results[:limit]
+
+    def mark_case_read(self, case_code: str, admin_id: int, last_read_msg_id: int):
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        target_msg_id = max(1, int(last_read_msg_id or 0))
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO admin_read_state (case_code, admin_id, last_read_msg_id, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(case_code, admin_id) DO UPDATE SET
+                            last_read_msg_id = MAX(admin_read_state.last_read_msg_id, excluded.last_read_msg_id),
+                            updated_at = excluded.updated_at
+                        """,
+                        (case_code, int(admin_id), target_msg_id, now)
+                    )
+                    conn.commit()
+            except Exception:
+                pass
+
+    def assign_case(self, case_code: str, admin_id: Optional[int], admin_name: Optional[str], actor: str) -> bool:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        updated = False
+        action = "CASE_CLAIMED" if admin_id else "CASE_RELEASED"
+        details = f"Assigned to {admin_name} (ID {admin_id})" if admin_id else "Case unassigned"
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    row = conn.execute("SELECT 1 FROM cases WHERE case_code = ?", (case_code,)).fetchone()
+                    if row:
+                        conn.execute(
+                            "UPDATE cases SET assigned_admin_id = ?, assigned_admin_name = ?, updated_at = ? WHERE case_code = ?",
+                            (admin_id, admin_name, now, case_code)
+                        )
+                        conn.execute(
+                            "INSERT INTO audit_logs (case_code, action, actor, details, timestamp) VALUES (?, ?, ?, ?, ?)",
+                            (case_code, action, actor, details, now)
+                        )
+                        conn.commit()
+                        updated = True
+            except Exception:
+                pass
+        return updated
+
+    def get_evidence_item(self, case_code: str, evidence_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch an evidence record strictly scoped by BOTH id and case_code (IDOR-safe)."""
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute(
+                        "SELECT * FROM evidence_files WHERE id = ? AND case_code = ?",
+                        (int(evidence_id), case_code)
+                    ).fetchone()
+                    if row:
+                        return dict(row)
+            except Exception:
+                pass
+        return None
+
+    def record_admin_audit(self, case_code: str, action: str, actor: str, details: str = ""):
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        for db in self._candidate_dbs():
+            try:
+                with sqlite3.connect(db) as conn:
+                    conn.execute(
+                        "INSERT INTO audit_logs (case_code, action, actor, details, timestamp) VALUES (?, ?, ?, ?, ?)",
+                        (case_code or "__SYSTEM__", action[:64], actor[:120], details[:500], now)
+                    )
+                    conn.commit()
+                    break
+            except Exception:
+                pass
+
 
 # =========================================================================
 # Support Telegram Bot Integration (Inline Keyboards & Two-Way Chat)
@@ -700,6 +904,9 @@ class SupportBotBridge:
         super_admin_callback: Optional[Callable[[int], bool]] = None,
         ops_group_chat_id: Optional[int] = None,
         storage_chat_id: Optional[int] = None,
+        webapp_url: Optional[str] = None,
+        bot_username: Optional[str] = None,
+        webapp_shortname: Optional[str] = None,
     ):
         self.app = application
         self.vault = vault
@@ -710,6 +917,11 @@ class SupportBotBridge:
         self.storage_chat_id = storage_chat_id
         self.auth_callback = auth_callback
         self.super_admin_callback = super_admin_callback
+        self.webapp_url = (webapp_url or os.getenv("SUPPORT_WEBAPP_URL") or "").strip().rstrip("/") or self._discover_default_webapp_url()
+        self.bot_username = (bot_username or os.getenv("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
+        self.webapp_shortname = (webapp_shortname or os.getenv("TELEGRAM_WEBAPP_SHORTNAME") or "").strip().strip("/")
+        self.main_mini_app = os.getenv("TELEGRAM_MAIN_MINI_APP", "0").strip() == "1"
+        self.legacy_chat_reply = os.getenv("LEGACY_TG_CHAT_REPLY", "0").strip() == "1"
         if allowed_user_ids is not None:
             self.allowed_user_ids: Set[int] = set(allowed_user_ids)
         elif admin_chat_id and admin_chat_id > 0:
@@ -723,6 +935,158 @@ class SupportBotBridge:
         self.msg_to_case: Dict[int, str] = {}
         if self.app and HAS_TELEGRAM:
             self._register_handlers()
+
+    def _discover_default_webapp_url(self) -> str:
+        """Infer HTTPS /tg-admin URL from Ghost configuration if SUPPORT_WEBAPP_URL is unset."""
+        for cfg_name in ("config.production.json", "config.development.json"):
+            for base_dir in (self.vault.ghost_dir, "/var/www/ghost"):
+                cfg_path = os.path.join(base_dir, cfg_name)
+                if os.path.isfile(cfg_path):
+                    try:
+                        with open(cfg_path, "r", encoding="utf-8") as f:
+                            cfg = json.load(f)
+                        raw_url = str(cfg.get("url") or "").strip().rstrip("/")
+                        if raw_url:
+                            return f"{raw_url}/tg-admin"
+                    except Exception:
+                        pass
+        return ""
+
+    def build_case_webapp_url(self, case_code: Optional[str] = None) -> str:
+        base = (self.webapp_url or "").strip().rstrip("/")
+        if not base:
+            return ""
+        if case_code:
+            return f"{base}/?case={urllib.parse.quote(str(case_code))}"
+        return f"{base}/"
+
+    def build_ops_deeplink_url(self, case_code: Optional[str] = None) -> Optional[str]:
+        """Build a Group-safe Telegram Mini App / bot deep link (Telegram forbids web_app buttons in groups)."""
+        uname = (self.bot_username or "").strip().lstrip("@")
+        if not uname:
+            return None
+        clean_code = str(case_code or "").strip().lstrip("#").upper()
+        if self.webapp_shortname:
+            param = f"case_{clean_code}" if clean_code else "inbox"
+            return f"https://t.me/{uname}/{self.webapp_shortname}?startapp={urllib.parse.quote(param)}"
+        if self.main_mini_app:
+            param = f"case_{clean_code}" if clean_code else "inbox"
+            return f"https://t.me/{uname}?startapp={urllib.parse.quote(param)}"
+        open_param = f"open_{clean_code}" if clean_code else "open_inbox"
+        return f"https://t.me/{uname}?start={urllib.parse.quote(open_param)}"
+
+    def make_open_webapp_button(self, label: str, target_chat_id: Optional[int], case_code: Optional[str] = None) -> Optional[Any]:
+        """Return an InlineKeyboardButton safe for the target chat type (WebAppInfo in DM, Direct/Start URL in Group)."""
+        if not HAS_TELEGRAM:
+            return None
+        w_url = self.build_case_webapp_url(case_code)
+        is_private_dm = target_chat_id is not None and int(target_chat_id) > 0
+        if is_private_dm and w_url.startswith("https://"):
+            return InlineKeyboardButton(label, web_app=WebAppInfo(url=w_url))
+        dl_url = self.build_ops_deeplink_url(case_code)
+        if dl_url:
+            return InlineKeyboardButton(label, url=dl_url)
+        return InlineKeyboardButton(label, callback_data=f"case_open:{case_code or 'INBOX'}")
+
+    async def fetch_evidence_bytes(self, evidence_row: Dict[str, Any]) -> Tuple[bytes, str]:
+        """Retrieve evidence bytes from local vault or server-side via Telegram Storage Bot API (never exposes BOT_TOKEN)."""
+        mime = str(evidence_row.get("mime_type") or "application/octet-stream")
+        stored_name = str(evidence_row.get("stored_filename") or "")
+        if stored_name:
+            local_path = self.vault.get_evidence_path(stored_name)
+            if local_path and os.path.isfile(local_path):
+                with open(local_path, "rb") as fp:
+                    return fp.read(), mime
+
+        tg_fid = evidence_row.get("telegram_file_id")
+        reported_size = int(evidence_row.get("file_size") or 0)
+        if reported_size > 20 * 1024 * 1024:
+            raise EvidenceTooLargeError("File exceeds Telegram Bot API 20 MB download limit; send to Bot DM instead.")
+
+        if tg_fid and self.app and HAS_TELEGRAM:
+            try:
+                tg_file = await self.app.bot.get_file(tg_fid)
+                raw = await tg_file.download_as_bytearray()
+                return bytes(raw), mime
+            except Exception as exc:
+                if "too big" in str(exc).lower():
+                    raise EvidenceTooLargeError("File exceeds Telegram Bot API 20 MB download limit; send to Bot DM instead.") from exc
+                raise FileNotFoundError(f"Could not fetch Telegram evidence: {exc}") from exc
+
+        raise FileNotFoundError("Evidence file is unavailable on local disk and Telegram Bot is offline.")
+
+    async def send_evidence_to_admin_dm(self, admin_user_id: int, case_code: str, evidence_row: Dict[str, Any]) -> bool:
+        """Send an evidence file directly to the authenticated admin's Private DM (supports files up to 50 MB via file_id)."""
+        if not self.app or not HAS_TELEGRAM or int(admin_user_id) <= 0:
+            return False
+        clean_fname = str(evidence_row.get("original_name") or "evidence.bin")
+        sha_short = str(evidence_row.get("sha256_hash") or "")[:16]
+        size_kb = int(evidence_row.get("file_size") or 0) // 1024
+        caption = (
+            f"📁 <b>{html.escape(clean_fname)}</b> (#{html.escape(case_code)})\n"
+            f"Size: {size_kb} KB · SHA-256: <code>{html.escape(sha_short)}</code>"
+        )
+        tg_fid = evidence_row.get("telegram_file_id")
+        if tg_fid:
+            await self.app.bot.send_document(
+                chat_id=int(admin_user_id),
+                document=tg_fid,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+            return True
+        stored_name = str(evidence_row.get("stored_filename") or "")
+        local_path = self.vault.get_evidence_path(stored_name) if stored_name else None
+        if local_path and os.path.isfile(local_path):
+            with open(local_path, "rb") as fp:
+                await self.app.bot.send_document(
+                    chat_id=int(admin_user_id),
+                    document=fp,
+                    filename=clean_fname,
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                )
+            return True
+        return False
+
+    async def delete_telegram_messages(self, tg_msgs: List[Tuple[int, int]]):
+        """Best-effort cleanup of Telegram storage/notification messages on case deletion."""
+        if not self.app or not HAS_TELEGRAM:
+            return
+        for tg_cid, tg_mid in tg_msgs:
+            try:
+                await self.app.bot.delete_message(chat_id=tg_cid, message_id=tg_mid)
+            except Exception:
+                pass
+
+    async def sync_ops_card_status(self, case_code: str):
+        """Best-effort refresh of the Telegram notification card when case status changes in WebApp."""
+        target_chat = self.ops_group_chat_id or self.admin_chat_id
+        if not self.app or not target_chat or not HAS_TELEGRAM:
+            return
+        case_data = self.vault.get_case(case_code)
+        if not case_data or not case_data.get("telegram_message_id"):
+            return
+        msg_id = int(case_data["telegram_message_id"])
+        text = self.format_case_card(case_data)
+        kb = self.make_case_keyboard(
+            case_data["case_code"],
+            case_data.get("status", "SUBMITTED"),
+            has_files=bool(case_data.get("files")),
+            msg_count=len(case_data.get("messages") or []),
+            can_delete=self._is_super_admin(target_chat),
+            target_chat_id=target_chat,
+        )
+        try:
+            await self.app.bot.edit_message_text(
+                chat_id=target_chat,
+                message_id=msg_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb,
+            )
+        except Exception:
+            pass
 
     async def store_evidence(
         self,
@@ -825,27 +1189,56 @@ class SupportBotBridge:
         except Exception as e:
             logger.warning("Could not register handlers on bot app (may already be registered in main): %s", e)
 
-    def make_case_keyboard(self, case_code: str, status: str, has_files: bool = False, msg_count: int = 0, can_delete: bool = False) -> Any:
+    def make_case_keyboard(
+        self,
+        case_code: str,
+        status: str,
+        has_files: bool = False,
+        msg_count: int = 0,
+        can_delete: bool = False,
+        target_chat_id: Optional[int] = None,
+    ) -> Any:
         if not HAS_TELEGRAM:
             return None
-        # Row 1: Chat & History, and Evidence (if files exist)
+        resolved_chat = target_chat_id if target_chat_id is not None else (self.ops_group_chat_id or self.admin_chat_id)
+        webapp_btn = self.make_open_webapp_button("🖥️ Open in Case Console", resolved_chat, case_code=case_code)
+
+        if not self.legacy_chat_reply:
+            rows = []
+            if webapp_btn:
+                rows.append([webapp_btn])
+            if resolved_chat and int(resolved_chat) > 0:
+                if can_delete:
+                    rows.append([
+                        InlineKeyboardButton("🗑️ Delete Case", callback_data=f"case_delete_ask:{case_code}"),
+                        InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list"),
+                    ])
+                else:
+                    rows.append([InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list")])
+            return InlineKeyboardMarkup(rows) if rows else None
+
+        # Legacy inline chat controls (only if LEGACY_TG_CHAT_REPLY=1)
+        rows = []
+        if webapp_btn:
+            rows.append([webapp_btn])
         row1 = [
             InlineKeyboardButton(f"💬 Chat & History ({msg_count})", callback_data=f"case_thread:{case_code}")
         ]
         if has_files:
             row1.append(InlineKeyboardButton("📎 Evidence", callback_data=f"case_evidence:{case_code}"))
+        rows.append(row1)
 
-        # Row 2: Status Menu and (if Super Admin) Delete Case
         row2 = [
             InlineKeyboardButton("⚙️ Change Status", callback_data=f"case_status_menu:{case_code}")
         ]
         if can_delete:
             row2.append(InlineKeyboardButton("🗑️ Delete Case", callback_data=f"case_delete_ask:{case_code}"))
-            row3 = [InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list")]
-            return InlineKeyboardMarkup([row1, row2, row3])
-
-        row2.append(InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list"))
-        return InlineKeyboardMarkup([row1, row2])
+            rows.append(row2)
+            rows.append([InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list")])
+        else:
+            row2.append(InlineKeyboardButton("⬅️ Back to Cases", callback_data="menu_cases_list"))
+            rows.append(row2)
+        return InlineKeyboardMarkup(rows)
 
     def make_status_menu_keyboard(self, case_code: str, can_delete: bool = False) -> Any:
         if not HAS_TELEGRAM:
@@ -972,7 +1365,7 @@ class SupportBotBridge:
         return text, kb
 
     async def notify_new_case(self, case_data: Dict[str, Any]):
-        """Send streamlined alert to the collaborative operations group (Group 1)."""
+        """Send streamlined notification alert with WebApp launch button to the ops chat."""
         target_chat = self.ops_group_chat_id or self.admin_chat_id
         if not self.app or not target_chat:
             logger.info("Standalone/No-admin mode: skipping Telegram case alert for %s", case_data.get("case_code"))
@@ -986,6 +1379,7 @@ class SupportBotBridge:
             has_files=has_files,
             msg_count=0,
             can_delete=self._is_super_admin(target_chat),
+            target_chat_id=target_chat,
         )
         try:
             msg = await self.app.bot.send_message(
@@ -1000,27 +1394,28 @@ class SupportBotBridge:
             logger.error("Failed to dispatch Telegram case notification to %s: %s", target_chat, e)
 
     async def notify_reporter_reply(self, case_code: str, message_text: str):
-        """Notify collaborative operations group when reporter sends a message on the web portal."""
+        """Notify ops chat with a WebApp launch link when reporter sends a message on the web portal."""
         target_chat = self.ops_group_chat_id or self.admin_chat_id
         if not self.app or not target_chat:
             logger.info("Standalone/No-admin mode: skipping Telegram reporter reply alert for %s", case_code)
             return
 
-        import html
+        snippet = str(message_text or "").strip()
+        if len(snippet) > 400:
+            snippet = snippet[:397] + "..."
         text = (
-            f"💬 <b>New Reply on #{case_code}</b>\n\n"
-            f"<blockquote>{html.escape(message_text)}</blockquote>\n"
-            f"<i>Reply to this message or tap below:</i>"
+            f"💬 <b>New Reporter Message on #{html.escape(case_code)}</b>\n\n"
+            f"<blockquote>{html.escape(snippet)}</blockquote>\n"
+            f"<i>Open in Case Console to review &amp; reply:</i>"
         )
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("💬 Send Reply", callback_data=f"case_reply:{case_code}"),
-                InlineKeyboardButton("📜 View Thread", callback_data=f"case_thread:{case_code}")
-            ],
-            [
-                InlineKeyboardButton("🔍 View Case", callback_data=f"case_view:{case_code}")
-            ]
-        ])
+        open_btn = self.make_open_webapp_button("🖥️ Open Case Console", target_chat, case_code=case_code)
+        rows = [[open_btn]] if open_btn else []
+        if self.legacy_chat_reply:
+            rows.append([
+                InlineKeyboardButton("💬 Legacy Reply", callback_data=f"case_reply:{case_code}"),
+                InlineKeyboardButton("🔍 View Case", callback_data=f"case_view:{case_code}"),
+            ])
+        kb = InlineKeyboardMarkup(rows) if (HAS_TELEGRAM and rows) else None
         try:
             msg = await self.app.bot.send_message(
                 chat_id=target_chat,
@@ -1077,7 +1472,23 @@ class SupportBotBridge:
 
             admin_user = query.from_user.username or query.from_user.first_name or "Administrator"
 
-            if action == "case_view":
+            chat_id_for_kb = query.message.chat.id if (query and query.message and query.message.chat) else caller_id
+
+            if action == "case_open":
+                dm_btn = self.make_open_webapp_button("🖥️ Open Case Console", caller_id, case_code=None if case_code == "INBOX" else case_code)
+                if query.message and query.message.chat and int(query.message.chat.id) < 0:
+                    try:
+                        await query.answer("Open the Case Console via my Private DM.", show_alert=True)
+                    except Exception:
+                        pass
+                else:
+                    await query.message.reply_text(
+                        f"🖥️ <b>Support Case Console</b>" + (f" (<b>#{html.escape(case_code)}</b>)" if case_code and case_code != "INBOX" else ""),
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=InlineKeyboardMarkup([[dm_btn]]) if dm_btn else None,
+                    )
+
+            elif action == "case_view":
                 msgs = self.vault.get_messages(case_code)
                 has_files = bool(case_data.get("files"))
                 text = self.format_case_card(case_data)
@@ -1087,6 +1498,7 @@ class SupportBotBridge:
                     has_files=has_files,
                     msg_count=len(msgs),
                     can_delete=is_super,
+                    target_chat_id=chat_id_for_kb,
                 )
                 try:
                     await query.edit_message_text(text=text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1095,6 +1507,14 @@ class SupportBotBridge:
                         raise
 
             elif action in ("case_thread", "case_history"):
+                if not self.legacy_chat_reply:
+                    dm_btn = self.make_open_webapp_button("🖥️ Open in Case Console", chat_id_for_kb, case_code=case_code)
+                    await query.message.reply_text(
+                        f"🖥️ <b>Case #{html.escape(case_code)} chat &amp; history are managed in the WebApp Case Console.</b>",
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=InlineKeyboardMarkup([[dm_btn]]) if dm_btn else None,
+                    )
+                    return
                 msgs = self.vault.get_messages(case_code)
                 text, kb = self.format_thread_view(case_code, case_data, msgs)
                 try:
@@ -1229,7 +1649,12 @@ class SupportBotBridge:
 
                 bot_client = getattr(context, "bot", None) or (self.app.bot if self.app else None)
                 if bot_client:
-                    for tg_cid, tg_mid in del_info.get("evidence_tg_messages", []):
+                    tg_cleanup = list(del_info.get("evidence_tg_messages", []))
+                    target_chat = self.ops_group_chat_id or self.admin_chat_id
+                    if target_chat:
+                        for ops_mid in del_info.get("ops_telegram_message_ids") or []:
+                            tg_cleanup.append((int(target_chat), int(ops_mid)))
+                    for tg_cid, tg_mid in tg_cleanup:
                         try:
                             await bot_client.delete_message(chat_id=tg_cid, message_id=tg_mid)
                         except Exception:
@@ -1250,6 +1675,19 @@ class SupportBotBridge:
                         raise
 
             elif action == "case_evidence":
+                if not self.legacy_chat_reply:
+                    try:
+                        await query.answer("Inspect evidence inside the Case Console WebApp.", show_alert=True)
+                    except Exception:
+                        pass
+                    dm_btn = self.make_open_webapp_button("🖥️ Open Evidence in Case Console", chat_id_for_kb, case_code=case_code)
+                    if dm_btn and query and query.message:
+                        await query.message.reply_text(
+                            f"📎 <b>Evidence for #{html.escape(case_code)}</b> is viewed securely inside the Case Console WebApp.",
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=InlineKeyboardMarkup([[dm_btn]]),
+                        )
+                    return
                 files = case_data.get("files", [])
                 if not files:
                     try:
@@ -1316,6 +1754,19 @@ class SupportBotBridge:
                     )
 
             elif action == "case_reply":
+                if not self.legacy_chat_reply:
+                    try:
+                        await query.answer("Replies have moved to the Case Console WebApp.", show_alert=True)
+                    except Exception:
+                        pass
+                    dm_btn = self.make_open_webapp_button("🖥️ Open Case Console", chat_id_for_kb, case_code=case_code)
+                    if dm_btn and query and query.message:
+                        await query.message.reply_text(
+                            f"💬 <b>Replying to #{html.escape(case_code)}</b> now happens inside the WebApp Case Console.",
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=InlineKeyboardMarkup([[dm_btn]]),
+                        )
+                    return
                 self.active_reply_sessions[query.from_user.id] = case_code
                 try:
                     await query.answer("💬 Reply Mode Active")
@@ -1347,6 +1798,16 @@ class SupportBotBridge:
 
         user_id = update.effective_user.id
         if not self._is_authorized_user(user_id):
+            return
+        if not self.legacy_chat_reply:
+            self.active_reply_sessions.pop(user_id, None)
+            if update.message.chat and int(update.message.chat.id) > 0:
+                open_btn = self.make_open_webapp_button("🖥️ Open Case Console", update.message.chat.id)
+                await update.message.reply_text(
+                    "🖥️ <b>Support replies &amp; evidence review now happen inside the Case Console WebApp.</b>",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=InlineKeyboardMarkup([[open_btn]]) if open_btn else None,
+                )
             return
         reply_to = update.message.reply_to_message
         case_code = None
@@ -1423,19 +1884,24 @@ class SupportBotBridge:
         )
 
     async def cases_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """List active cases."""
+        """List active cases with one-tap Case Console WebApp buttons."""
         caller_id = update.effective_user.id if update.effective_user else None
         if not self._is_authorized_user(caller_id):
             if update.message:
                 await update.message.reply_text("⛔ Access Denied.")
             return
-        cases = self.vault.list_recent_cases(limit=10)
+        chat_id = update.effective_chat.id if update.effective_chat else caller_id
+        inbox_btn = self.make_open_webapp_button("🖥️ Open Support Case Console", chat_id)
+        cases = self.vault.list_recent_cases(limit=8)
         if not cases:
-            await update.message.reply_text("ℹ️ No support cases currently on record.")
+            kb = InlineKeyboardMarkup([[inbox_btn]]) if (HAS_TELEGRAM and inbox_btn) else None
+            await update.message.reply_text("ℹ️ No support cases currently on record.", reply_markup=kb)
             return
 
         lines = ["📋 <b>Recent Cases</b>\n"]
         buttons = []
+        if inbox_btn:
+            buttons.append([inbox_btn])
         for c in cases:
             cc_raw = str(c.get('case_code') or 'UNKNOWN')
             cs_raw = str(c.get('status') or 'SUBMITTED').upper()
@@ -1450,8 +1916,10 @@ class SupportBotBridge:
                 f"• <b>#{cc}</b> [{cp}] · {cg}\n"
                 f"  <b>{cs}</b> — {sub}\n"
             )
-            buttons.append([InlineKeyboardButton(f"{st_icon} #{cc_raw} - {sub_raw[:22]}", callback_data=f"case_view:{cc_raw}")])
-        lines.append("<i>Select a case below:</i>")
+            btn = self.make_open_webapp_button(f"{st_icon} #{cc_raw} - {sub_raw[:22]}", chat_id, case_code=cc_raw)
+            if btn:
+                buttons.append([btn])
+        lines.append("<i>Tap below to open a case in the Mini App:</i>")
         kb = InlineKeyboardMarkup(buttons) if HAS_TELEGRAM and buttons else None
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=kb)
 
@@ -1665,11 +2133,39 @@ class CaptchaEngine:
 
 
 class SupportApiServer:
-    MAX_BODY_BYTES = 50 * 1024 * 1024  # 50 MB hard payload cap
+    MAX_BODY_BYTES = 50 * 1024 * 1024  # 50 MB overall HTTP payload cap
+    MAX_EVIDENCE_BYTES = 20 * 1024 * 1024  # 20 MB per-file cap (Telegram Bot API getFile download limit)
+    MAX_EVIDENCE_CACHE_BYTES = 48 * 1024 * 1024  # Bounded in-memory LRU for streamed evidence previews
+    EVIDENCE_CACHE_TTL_SEC = 300.0
+    ADMIN_IDLE_TTL_SEC = 900.0  # 15 min idle session timeout
+    ADMIN_MAX_TTL_SEC = 7200.0  # 2 hr hard session timeout
+    ADMIN_INITDATA_MAX_AGE_SEC = int(os.getenv("ADMIN_INITDATA_MAX_AGE_SEC", "300") or "300")
     LARGE_UPLOAD_THRESHOLD = 2 * 1024 * 1024  # 2 MB concurrency gate
     MAX_HEADER_COUNT = 64
     MAX_HEADER_LINE_BYTES = 8192
     MAX_FILES_PER_CASE = 15
+
+    SAFE_PREVIEW_EXTS: Dict[str, str] = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+        ".bmp": "image/bmp",
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+        ".mp3": "audio/mpeg",
+        ".ogg": "audio/ogg",
+        ".wav": "audio/wav",
+        ".m4a": "audio/mp4",
+        ".pdf": "application/pdf",
+        ".txt": "text/plain; charset=utf-8",
+        ".log": "text/plain; charset=utf-8",
+        ".csv": "text/plain; charset=utf-8",
+        ".json": "text/plain; charset=utf-8",
+        ".eml": "text/plain; charset=utf-8",
+    }
 
     def __init__(self, vault: SupportVault, bridge: SupportBotBridge, host: str = "127.0.0.1", port: int = 8080):
         self.vault = vault
@@ -1680,9 +2176,238 @@ class SupportApiServer:
         self.captcha = CaptchaEngine()
         self._conn_sem = asyncio.Semaphore(32)
         self._upload_sem = asyncio.Semaphore(2)
+        self._evidence_dl_sem = asyncio.Semaphore(4)
         # Bounded sliding-window rate-limit buckets: bucket_name -> {key -> [timestamps]}
         self._rate_buckets: Dict[str, Dict[str, List[float]]] = {}
+        # Bounded ephemeral admin Mini App sessions: token -> session dict
+        self._admin_sessions: Dict[str, Dict[str, Any]] = {}
+        # Single-use 30s evidence download tickets: ticket -> ticket dict
+        self._dl_tickets: Dict[str, Dict[str, Any]] = {}
+        # Bounded evidence byte cache: cache_key -> (timestamp, bytes)
+        self._evidence_cache: Dict[str, Tuple[float, bytes]] = {}
+        self._evidence_cache_bytes = 0
         self._ghost_port, self._ghost_origin, self._ghost_host, self._ghost_proto = self._load_ghost_upstream_config()
+
+    def _resolve_bot_token(self) -> str:
+        """Resolve Telegram Bot Token from active bot application or environment (never exposed to clients)."""
+        if self.bridge and self.bridge.app and getattr(self.bridge.app, "bot", None):
+            tok = str(getattr(self.bridge.app.bot, "token", "") or "").strip()
+            if tok:
+                return tok
+        return (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
+
+    def _verify_telegram_init_data(self, raw_init_data: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """
+        Cryptographically verify Telegram WebApp initData (HMAC-SHA-256 with 'WebAppData' key).
+        Returns (status_code_str, parsed_info) where status_code_str is one of:
+          'ok', 'unconfigured', 'invalid', 'expired', 'forbidden'
+        """
+        bot_token = self._resolve_bot_token()
+        if not bot_token or bot_token == "your_bot_token_here":
+            return "unconfigured", None
+
+        raw = str(raw_init_data or "").strip()
+        if not raw or len(raw) > 8192:
+            return "invalid", None
+
+        try:
+            pairs = urllib.parse.parse_qsl(raw, keep_blank_values=True, strict_parsing=True)
+        except Exception:
+            return "invalid", None
+
+        vals: Dict[str, str] = {}
+        received_hash = ""
+        for k, v in pairs:
+            if k == "hash":
+                received_hash = v
+            else:
+                vals[k] = v
+
+        if not received_hash or not re.fullmatch(r"[0-9a-fA-F]{64}", received_hash):
+            return "invalid", None
+
+        data_check_string = "\n".join(f"{k}={vals[k]}" for k in sorted(vals.keys()))
+        secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
+        computed_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(computed_hash.lower(), received_hash.lower()):
+            return "invalid", None
+
+        try:
+            auth_date = int(vals.get("auth_date") or "0")
+        except (ValueError, TypeError):
+            return "invalid", None
+
+        now_ts = int(time.time())
+        if auth_date <= 0 or auth_date > now_ts + 60 or (now_ts - auth_date) > max(60, self.ADMIN_INITDATA_MAX_AGE_SEC):
+            return "expired", None
+
+        try:
+            user_obj = json.loads(vals.get("user") or "{}")
+            user_id = int(user_obj.get("id") or 0)
+        except Exception:
+            return "invalid", None
+
+        if user_id <= 0:
+            return "invalid", None
+
+        info = {
+            "user_id": user_id,
+            "username": str(user_obj.get("username") or "").strip()[:64],
+            "first_name": str(user_obj.get("first_name") or "").strip()[:64],
+            "last_name": str(user_obj.get("last_name") or "").strip()[:64],
+            "start_param": str(vals.get("start_param") or "").strip()[:128],
+            "chat_type": str(vals.get("chat_type") or "").strip()[:32],
+            "auth_date": auth_date,
+        }
+
+        if not self.bridge._is_authorized_user(user_id):
+            return "forbidden", info
+
+        return "ok", info
+
+    def _evict_expired_admin_sessions(self):
+        now = time.time()
+        dead = [
+            tok for tok, s in self._admin_sessions.items()
+            if (now - s["last_seen"] > self.ADMIN_IDLE_TTL_SEC) or (now > s["hard_expires"])
+        ]
+        for tok in dead:
+            self._admin_sessions.pop(tok, None)
+        if len(self._admin_sessions) > 500:
+            oldest = sorted(self._admin_sessions.keys(), key=lambda t: self._admin_sessions[t]["last_seen"])[: len(self._admin_sessions) - 400]
+            for tok in oldest:
+                self._admin_sessions.pop(tok, None)
+
+        dead_tickets = [tk for tk, tv in self._dl_tickets.items() if now > tv["expires_at"]]
+        for tk in dead_tickets:
+            self._dl_tickets.pop(tk, None)
+        if len(self._dl_tickets) > 200:
+            oldest_tk = sorted(self._dl_tickets.keys(), key=lambda t: self._dl_tickets[t]["expires_at"])[: len(self._dl_tickets) - 150]
+            for tk in oldest_tk:
+                self._dl_tickets.pop(tk, None)
+
+    def _create_admin_session(self, info: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+        self._evict_expired_admin_sessions()
+        now = time.time()
+        token = secrets.token_urlsafe(32)
+        ua_hash = hashlib.sha256((headers.get("user-agent") or "").encode("utf-8", errors="ignore")).hexdigest()[:16]
+        uid = int(info["user_id"])
+        sess = {
+            "token": token,
+            "user_id": uid,
+            "username": info.get("username") or "",
+            "first_name": info.get("first_name") or "Admin",
+            "ua_hash": ua_hash,
+            "created_at": now,
+            "last_seen": now,
+            "hard_expires": now + self.ADMIN_MAX_TTL_SEC,
+        }
+        self._admin_sessions[token] = sess
+        is_super = self.bridge._is_super_admin(uid)
+        display_name = sess["first_name"] or (f"@{sess['username']}" if sess["username"] else f"Admin #{uid}")
+        return {
+            "token": token,
+            "expires_in": int(self.ADMIN_IDLE_TTL_SEC),
+            "admin": {
+                "user_id": uid,
+                "username": sess["username"],
+                "first_name": sess["first_name"],
+                "display_name": display_name,
+                "role": "super_admin" if is_super else "support_admin",
+                "is_super_admin": is_super,
+            },
+        }
+
+    def _require_admin_session(self, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
+        """Validate Bearer session token AND live Telegram admin allowlist membership on every call."""
+        self._evict_expired_admin_sessions()
+        auth_hdr = str(headers.get("authorization") or "").strip()
+        if not auth_hdr.lower().startswith("bearer "):
+            return None
+        token = auth_hdr[7:].strip()
+        if not token or token not in self._admin_sessions:
+            return None
+        sess = self._admin_sessions[token]
+        now = time.time()
+        if (now - sess["last_seen"] > self.ADMIN_IDLE_TTL_SEC) or (now > sess["hard_expires"]):
+            self._admin_sessions.pop(token, None)
+            return None
+        ua_hash = hashlib.sha256((headers.get("user-agent") or "").encode("utf-8", errors="ignore")).hexdigest()[:16]
+        if sess.get("ua_hash") and not hmac.compare_digest(sess["ua_hash"], ua_hash):
+            return None
+        uid = int(sess["user_id"])
+        if not self.bridge._is_authorized_user(uid):
+            self._admin_sessions.pop(token, None)
+            return None
+        sess["last_seen"] = now
+        is_super = self.bridge._is_super_admin(uid)
+        actor_label = (
+            f"@{sess['username']} (TG#{uid})"
+            if sess.get("username")
+            else f"{sess.get('first_name') or 'Admin'} (TG#{uid})"
+        )
+        return {
+            "token": token,
+            "user_id": uid,
+            "username": sess.get("username") or "",
+            "first_name": sess.get("first_name") or "Admin",
+            "is_super_admin": is_super,
+            "role": "super_admin" if is_super else "support_admin",
+            "actor_label": actor_label,
+        }
+
+    def _evict_evidence_cache_if_needed(self):
+        now = time.time()
+        expired = [k for k, (ts, _) in self._evidence_cache.items() if (now - ts) > self.EVIDENCE_CACHE_TTL_SEC]
+        for k in expired:
+            _, data = self._evidence_cache.pop(k, (0.0, b""))
+            self._evidence_cache_bytes = max(0, self._evidence_cache_bytes - len(data))
+        while self._evidence_cache_bytes > self.MAX_EVIDENCE_CACHE_BYTES and self._evidence_cache:
+            oldest_k = min(self._evidence_cache.keys(), key=lambda x: self._evidence_cache[x][0])
+            _, data = self._evidence_cache.pop(oldest_k, (0.0, b""))
+            self._evidence_cache_bytes = max(0, self._evidence_cache_bytes - len(data))
+
+    async def _get_or_fetch_evidence_bytes(self, case_code: str, ev_item: Dict[str, Any]) -> Tuple[bytes, str]:
+        self._evict_evidence_cache_if_needed()
+        ev_id = int(ev_item["id"])
+        sha_part = str(ev_item.get("sha256_hash") or "")[:16]
+        cache_key = f"{case_code}:{ev_id}:{sha_part}"
+        cached = self._evidence_cache.get(cache_key)
+        mime = str(ev_item.get("mime_type") or "application/octet-stream")
+        if cached is not None:
+            return cached[1], mime
+        async with self._evidence_dl_sem:
+            cached = self._evidence_cache.get(cache_key)
+            if cached is not None:
+                return cached[1], mime
+            data, resolved_mime = await self.bridge.fetch_evidence_bytes(ev_item)
+            if len(data) <= 20 * 1024 * 1024:
+                self._evidence_cache[cache_key] = (time.time(), data)
+                self._evidence_cache_bytes += len(data)
+                self._evict_evidence_cache_if_needed()
+            return data, resolved_mime
+
+    def _resolve_static_tg_admin_file(self, filename: str) -> Optional[Tuple[bytes, str]]:
+        """Serve tg-admin/{index.html, app.css, app.js} strictly from allowlisted files."""
+        allowed = {
+            "index.html": "text/html; charset=utf-8",
+            "app.css": "text/css; charset=utf-8",
+            "app.js": "application/javascript; charset=utf-8",
+        }
+        clean_name = os.path.basename(filename or "")
+        if clean_name not in allowed:
+            return None
+        candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "tg-admin", clean_name),
+            os.path.join(self.vault.ghost_dir, "tg-admin", clean_name),
+            os.path.join("/var/www/ghost/tg-admin", clean_name),
+            os.path.join("/opt/ghost-telegram-bot/tg-admin", clean_name),
+        ]
+        for p in candidates:
+            if os.path.isfile(p):
+                with open(p, "rb") as fp:
+                    return fp.read(), allowed[clean_name]
+        return None
 
     def _load_ghost_upstream_config(self) -> Tuple[int, str, str, str]:
         """Discover local Ghost port and configured public URL origin from config.*.json."""
@@ -1911,8 +2636,8 @@ class SupportApiServer:
                 cors_origin = self._resolve_cors_origin(req_origin)
                 header_lines = [
                     "HTTP/1.1 204 No Content",
-                    "Access-Control-Allow-Methods: GET, POST, OPTIONS",
-                    "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key",
+                    "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key, X-Preview",
                     "Access-Control-Max-Age: 86400",
                     "X-Content-Type-Options: nosniff",
                     "Cross-Origin-Opener-Policy: same-origin",
@@ -2058,6 +2783,9 @@ class SupportApiServer:
                             if not payload:
                                 continue
                             if filename:
+                                if len(payload) > self.MAX_EVIDENCE_BYTES:
+                                    await self._send_response(writer, 413, {"error": f"Attachment '{os.path.basename(filename)}' exceeds the 20 MB per-file limit."}, req_origin=req_origin)
+                                    return
                                 if len(evidence_files) < 10:
                                     evidence_files.append({"filename": filename, "data": payload, "mime": part.get_content_type()})
                             elif name:
@@ -2310,6 +3038,10 @@ class SupportApiServer:
                     return
 
                 if attached_file:
+                    if len(attached_file["data"]) > self.MAX_EVIDENCE_BYTES:
+                        attached_file["data"] = b""
+                        await self._send_response(writer, 413, {"error": "Attachment exceeds the 20 MB per-file limit."}, req_origin=req_origin)
+                        return
                     existing_files = case_data.get("files") or []
                     if len(existing_files) >= self.MAX_FILES_PER_CASE:
                         await self._send_response(writer, 429, {"error": f"Maximum attachment limit ({self.MAX_FILES_PER_CASE} files) reached for this case."}, req_origin=req_origin)
@@ -2334,6 +3066,477 @@ class SupportApiServer:
                     "message": new_msg
                 }, req_origin=req_origin)
                 return
+
+            # -------------------------------------------------------------
+            # Static Mini App Shell Fallback (/webapp/* or /tg-admin/* for standalone local dev)
+            # -------------------------------------------------------------
+            elif method == "GET" and (route_path in ("/webapp", "/tg-admin") or route_path.startswith("/webapp/") or route_path.startswith("/tg-admin/")):
+                rel = "index.html"
+                if route_path.endswith("/app.css"):
+                    rel = "app.css"
+                elif route_path.endswith("/app.js"):
+                    rel = "app.js"
+                elif route_path not in ("/webapp", "/tg-admin"):
+                    await self._send_response(writer, 404, {"error": "Mini App asset not found."}, req_origin=req_origin)
+                    return
+                loaded = self._resolve_static_tg_admin_file(rel)
+                if not loaded:
+                    await self._send_response(writer, 404, {"error": "Mini App assets not installed on server."}, req_origin=req_origin)
+                    return
+                raw_bytes, mime = loaded
+                webapp_csp = (
+                    "default-src 'none'; base-uri 'self'; form-action 'none'; "
+                    "frame-ancestors 'self' https://web.telegram.org; "
+                    "script-src 'self' https://telegram.org; "
+                    "style-src 'self' https://fonts.googleapis.com; "
+                    "font-src 'self' data: https://fonts.gstatic.com; "
+                    "img-src 'self' data: blob:; media-src 'self' blob:; "
+                    "connect-src 'self'; frame-src 'self' blob:"
+                )
+                extra_headers = [
+                    f"Content-Security-Policy: {webapp_csp}",
+                    "Cross-Origin-Opener-Policy: same-origin-allow-popups",
+                    "Cross-Origin-Resource-Policy: cross-origin",
+                    "X-Content-Type-Options: nosniff",
+                    "X-Permitted-Cross-Domain-Policies: none",
+                    "Referrer-Policy: no-referrer",
+                    "Cache-Control: no-store",
+                ]
+                await self._send_bytes_response(writer, 200, "OK", raw_bytes, mime, extra_headers=extra_headers)
+                return
+
+            # -------------------------------------------------------------
+            # POST /admin/auth (Exchange Telegram Mini App initData for Bearer Session)
+            # -------------------------------------------------------------
+            elif method == "POST" and route_path == "/admin/auth":
+                if self._check_rate_limit("admin_auth", client_ip, max_hits=15, window_sec=300):
+                    await self._send_response(writer, 429, {"error": "Too many authentication attempts. Please wait briefly."}, req_origin=req_origin)
+                    return
+                try:
+                    p = json.loads(body.decode("utf-8"))
+                    body = b""
+                except Exception:
+                    await self._send_response(writer, 400, {"error": "Invalid JSON body."}, req_origin=req_origin)
+                    return
+
+                raw_init_data = str(p.get("init_data", "") or "")
+                status_tag, info = self._verify_telegram_init_data(raw_init_data)
+                if status_tag == "unconfigured":
+                    await self._send_response(writer, 503, {"error": "Telegram bot token is not configured on this server."}, req_origin=req_origin)
+                    return
+                if status_tag == "expired":
+                    await self._send_response(writer, 401, {"error": "Telegram session expired. Re-open the Case Console from Telegram."}, req_origin=req_origin)
+                    return
+                if status_tag == "invalid" or not info:
+                    await self._send_response(writer, 401, {"error": "Invalid Telegram Mini App signature."}, req_origin=req_origin)
+                    return
+                if status_tag == "forbidden":
+                    denied_uid = info.get("user_id")
+                    self.vault.record_admin_audit("__SYSTEM__", "ADMIN_WEBAPP_DENIED", f"TG#{denied_uid}", f"ip={ip_hash}")
+                    await self._send_response(writer, 403, {"error": "Access Denied: Your Telegram account is not an authorized support admin."}, req_origin=req_origin)
+                    return
+
+                sess_payload = self._create_admin_session(info, headers)
+                actor_name = sess_payload["admin"]["display_name"]
+                self.vault.record_admin_audit("__SYSTEM__", "ADMIN_WEBAPP_LOGIN", f"{actor_name} (TG#{info['user_id']})", f"ip={ip_hash}")
+                await self._send_response(writer, 200, {
+                    "success": True,
+                    **sess_payload,
+                    "start_param": info.get("start_param") or "",
+                }, req_origin=req_origin)
+                return
+
+            # -------------------------------------------------------------
+            # POST /admin/logout
+            # -------------------------------------------------------------
+            elif method == "POST" and route_path == "/admin/logout":
+                sess = self._require_admin_session(headers)
+                if sess:
+                    self._admin_sessions.pop(sess["token"], None)
+                await self._send_response(writer, 200, {"success": True}, req_origin=req_origin)
+                return
+
+            # -------------------------------------------------------------
+            # GET /admin/cases (Admin Case Inbox List)
+            # -------------------------------------------------------------
+            elif method == "GET" and route_path == "/admin/cases":
+                sess = self._require_admin_session(headers)
+                if not sess:
+                    await self._send_response(writer, 401, {"error": "Unauthorized or expired Telegram admin session."}, req_origin=req_origin)
+                    return
+                if self._check_rate_limit("admin_api", str(sess["user_id"]), max_hits=240, window_sec=60):
+                    await self._send_response(writer, 429, {"error": "Rate limit exceeded."}, req_origin=req_origin)
+                    return
+
+                filter_status = (query.get("status") or "").strip().upper()
+                search_q = (query.get("q") or "").strip()
+                all_for_counts = self.vault.list_cases_admin(status=None, q=None, limit=200, viewer_admin_id=sess["user_id"])
+                counts = {"ALL": len(all_for_counts), "SUBMITTED": 0, "IN_REVIEW": 0, "CLOSED": 0, "REJECTED": 0, "UNREAD": 0}
+                for item in all_for_counts:
+                    st = str(item.get("status") or "SUBMITTED").upper()
+                    if st in counts:
+                        counts[st] += 1
+                    if item.get("unread"):
+                        counts["UNREAD"] += 1
+
+                if not filter_status and not search_q:
+                    cases = all_for_counts[:80]
+                else:
+                    cases = self.vault.list_cases_admin(
+                        status=filter_status or None,
+                        q=search_q or None,
+                        limit=80,
+                        viewer_admin_id=sess["user_id"],
+                    )
+                await self._send_response(writer, 200, {
+                    "success": True,
+                    "cases": cases,
+                    "counts": counts,
+                    "admin": {
+                        "user_id": sess["user_id"],
+                        "role": sess["role"],
+                        "is_super_admin": sess["is_super_admin"],
+                    },
+                }, req_origin=req_origin)
+                return
+
+            # -------------------------------------------------------------
+            # GET /admin/dl/<ticket> (Single-Use Ticket Download for Native Client)
+            # -------------------------------------------------------------
+            elif method == "GET" and route_path.startswith("/admin/dl/"):
+                parts = [p for p in route_path.split("/") if p]
+                ticket = parts[2] if len(parts) == 3 else ""
+                tinfo = self._dl_tickets.pop(ticket, None)
+                if not tinfo or time.time() > tinfo.get("expires_at", 0):
+                    await self._send_response(writer, 403, {"error": "Download link is invalid or has expired."}, req_origin=req_origin)
+                    return
+                if not self.bridge._is_authorized_user(tinfo.get("admin_id")):
+                    await self._send_response(writer, 403, {"error": "Admin authorization revoked."}, req_origin=req_origin)
+                    return
+                ev_item = self.vault.get_evidence_item(tinfo["case_code"], tinfo["ev_id"])
+                if not ev_item:
+                    await self._send_response(writer, 404, {"error": "Evidence file not found."}, req_origin=req_origin)
+                    return
+                try:
+                    ev_bytes, _ = await self._get_or_fetch_evidence_bytes(tinfo["case_code"], ev_item)
+                except EvidenceTooLargeError as exc:
+                    await self._send_response(writer, 413, {"error": str(exc), "too_large_for_webapp": True}, req_origin=req_origin)
+                    return
+                except FileNotFoundError:
+                    await self._send_response(writer, 404, {"error": "Evidence bytes are no longer available."}, req_origin=req_origin)
+                    return
+
+                dl_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', str(ev_item.get("original_name") or "evidence.bin"))[:120]
+                extra_headers = [
+                    "Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'",
+                    "X-Content-Type-Options: nosniff",
+                    "X-Frame-Options: DENY",
+                    "Cross-Origin-Opener-Policy: same-origin",
+                    "Cross-Origin-Resource-Policy: same-origin",
+                    "X-Permitted-Cross-Domain-Policies: none",
+                    "Cache-Control: no-store",
+                    f'Content-Disposition: attachment; filename="{dl_name}"',
+                ]
+                await self._send_bytes_response(writer, 200, "OK", ev_bytes, "application/octet-stream", extra_headers=extra_headers)
+                return
+
+            # -------------------------------------------------------------
+            # Admin Case-Scoped Endpoints (/admin/cases/<case_code>/...)
+            # -------------------------------------------------------------
+            elif route_path.startswith("/admin/cases/"):
+                sess = self._require_admin_session(headers)
+                if not sess:
+                    await self._send_response(writer, 401, {"error": "Unauthorized or expired Telegram admin session."}, req_origin=req_origin)
+                    return
+                if self._check_rate_limit("admin_api", str(sess["user_id"]), max_hits=240, window_sec=60):
+                    await self._send_response(writer, 429, {"error": "Rate limit exceeded."}, req_origin=req_origin)
+                    return
+
+                parts = [p for p in route_path.split("/") if p]
+                # parts: ['admin', 'cases', '<case_code>', ...]
+                if len(parts) < 3 or not re.fullmatch(r"[A-Za-z0-9-]+", parts[2]):
+                    await self._send_response(writer, 400, {"error": "Invalid case identifier."}, req_origin=req_origin)
+                    return
+                case_code = parts[2].upper()
+                case_data = self.vault.get_case(case_code)
+                if not case_data:
+                    await self._send_response(writer, 404, {"error": f"Case #{case_code} not found."}, req_origin=req_origin)
+                    return
+
+                # GET /admin/cases/<code>
+                if method == "GET" and len(parts) == 3:
+                    msgs = case_data.get("messages") or []
+                    if msgs:
+                        self.vault.mark_case_read(case_code, sess["user_id"], int(msgs[-1].get("id") or 0))
+                    else:
+                        self.vault.mark_case_read(case_code, sess["user_id"], 1)
+
+                    safe_files = []
+                    for f in case_data.get("files", []):
+                        orig_name = str(f.get("original_name") or "evidence.bin")
+                        ext = os.path.splitext(orig_name)[1].lower()
+                        f_size = int(f.get("file_size") or 0)
+                        safe_files.append({
+                            "id": f["id"],
+                            "name": orig_name,
+                            "size": f_size,
+                            "mime": f.get("mime_type") or "application/octet-stream",
+                            "sha256": f.get("sha256_hash") or "",
+                            "created_at": f.get("created_at"),
+                            "storage": "telegram" if f.get("telegram_file_id") else "local",
+                            "previewable": ext in self.SAFE_PREVIEW_EXTS and f_size <= self.MAX_EVIDENCE_BYTES,
+                            "can_direct_dl": f_size <= self.MAX_EVIDENCE_BYTES,
+                        })
+
+                    await self._send_response(writer, 200, {
+                        "success": True,
+                        "case": {
+                            "case_code": case_data["case_code"],
+                            "category": case_data["category"],
+                            "priority": case_data["priority"],
+                            "status": case_data["status"],
+                            "subject": case_data["subject"],
+                            "description": case_data["description"],
+                            "reporter_alias": case_data.get("reporter_alias") or "Anonymous",
+                            "reporter_contact": case_data.get("reporter_contact") or "",
+                            "member_email": case_data.get("member_email") or "",
+                            "assigned_admin_id": case_data.get("assigned_admin_id"),
+                            "assigned_admin_name": case_data.get("assigned_admin_name"),
+                            "resolution_note": case_data.get("resolution_note") or "",
+                            "created_at": case_data["created_at"],
+                            "updated_at": case_data["updated_at"],
+                            "files": safe_files,
+                            "messages": msgs,
+                            "audit_logs": case_data.get("audit_logs", []),
+                        },
+                    }, req_origin=req_origin)
+                    return
+
+                # POST /admin/cases/<code>/claim
+                elif method == "POST" and len(parts) == 4 and parts[3] == "claim":
+                    try:
+                        p = json.loads(body.decode("utf-8")) if body else {}
+                    except Exception:
+                        await self._send_response(writer, 400, {"error": "Invalid JSON body."}, req_origin=req_origin)
+                        return
+                    action = str(p.get("action") or "claim").strip().lower()
+                    if action == "release":
+                        cur_owner = case_data.get("assigned_admin_id")
+                        if cur_owner and int(cur_owner) != sess["user_id"] and not sess["is_super_admin"]:
+                            await self._send_response(writer, 403, {"error": "Only the assigned admin or a Super Admin can release this claim."}, req_origin=req_origin)
+                            return
+                        self.vault.assign_case(case_code, None, None, actor=sess["actor_label"])
+                        await self._send_response(writer, 200, {"success": True, "assigned_admin_id": None, "assigned_admin_name": None}, req_origin=req_origin)
+                        return
+                    assignee_name = sess["first_name"] or (f"@{sess['username']}" if sess["username"] else f"Admin #{sess['user_id']}")
+                    self.vault.assign_case(case_code, sess["user_id"], assignee_name, actor=sess["actor_label"])
+                    await self._send_response(writer, 200, {"success": True, "assigned_admin_id": sess["user_id"], "assigned_admin_name": assignee_name}, req_origin=req_origin)
+                    return
+
+                # POST /admin/cases/<code>/status
+                elif method == "POST" and len(parts) == 4 and parts[3] == "status":
+                    try:
+                        p = json.loads(body.decode("utf-8")) if body else {}
+                    except Exception:
+                        await self._send_response(writer, 400, {"error": "Invalid JSON body."}, req_origin=req_origin)
+                        return
+                    new_status = str(p.get("status") or "").strip().upper()
+                    if new_status not in ("SUBMITTED", "IN_REVIEW", "CLOSED", "REJECTED"):
+                        await self._send_response(writer, 400, {"error": "Invalid status value."}, req_origin=req_origin)
+                        return
+                    note = str(p.get("resolution_note") or "").strip()[:1000] or None
+                    self.vault.update_status(case_code, new_status, actor=sess["actor_label"], note=note)
+                    asyncio.create_task(self.bridge.sync_ops_card_status(case_code))
+                    await self._send_response(writer, 200, {"success": True, "status": new_status, "resolution_note": note or ""}, req_origin=req_origin)
+                    return
+
+                # POST /admin/cases/<code>/messages (Admin WebApp Chat Reply + Optional Evidence)
+                elif method == "POST" and len(parts) == 4 and parts[3] == "messages":
+                    ctype = headers.get("content-type", "")
+                    text = ""
+                    attached_file = None
+                    if "multipart/form-data" in ctype:
+                        try:
+                            msg_bytes = f"Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
+                            body = b""
+                            msg = BytesParser(policy=policy.default).parsebytes(msg_bytes)
+                            del msg_bytes
+                            for part in msg.iter_parts():
+                                name = part.get_param("name", header="content-disposition")
+                                filename = part.get_filename()
+                                payload = part.get_payload(decode=True)
+                                if filename and payload and attached_file is None:
+                                    attached_file = {"filename": filename, "data": payload, "mime": part.get_content_type()}
+                                elif name == "message" and payload:
+                                    text = payload.decode("utf-8", errors="replace").strip()[:10000]
+                            del msg
+                        except Exception:
+                            await self._send_response(writer, 400, {"error": "Failed to parse multipart message payload."}, req_origin=req_origin)
+                            return
+                    else:
+                        try:
+                            p = json.loads(body.decode("utf-8")) if body else {}
+                            body = b""
+                            text = str(p.get("message", "") or "").strip()[:10000]
+                        except Exception:
+                            await self._send_response(writer, 400, {"error": "Invalid JSON body."}, req_origin=req_origin)
+                            return
+
+                    if not text and not attached_file:
+                        await self._send_response(writer, 400, {"error": "Reply text or attachment is required."}, req_origin=req_origin)
+                        return
+
+                    if attached_file:
+                        if len(attached_file["data"]) > self.MAX_EVIDENCE_BYTES:
+                            attached_file["data"] = b""
+                            await self._send_response(writer, 413, {"error": "Attachment exceeds the 20 MB per-file limit."}, req_origin=req_origin)
+                            return
+                        existing_files = case_data.get("files") or []
+                        if len(existing_files) >= self.MAX_FILES_PER_CASE:
+                            await self._send_response(writer, 429, {"error": f"Maximum attachment limit ({self.MAX_FILES_PER_CASE} files) reached for this case."}, req_origin=req_origin)
+                            return
+                        saved_ev = await self.bridge.store_evidence(case_code, attached_file["filename"], attached_file["data"], attached_file.get("mime"))
+                        attached_file["data"] = b""
+                        safe_disp_name = saved_ev.get("original_name") or "attachment"
+                        text = f"📁 [{safe_disp_name}]\n{text}" if text else f"📁 [{safe_disp_name}]"
+
+                    sender_disp = f"Investigator {sess['first_name']}" if sess.get("first_name") else "Investigator"
+                    new_msg = self.vault.add_message(
+                        case_code=case_code,
+                        sender_type="admin",
+                        sender_name=sender_disp,
+                        text=text,
+                    )
+                    self.vault.mark_case_read(case_code, sess["user_id"], int(new_msg.get("id") or 0))
+                    self.vault.record_admin_audit(case_code, "ADMIN_REPLY", sess["actor_label"], f"Msg #{new_msg.get('id')}")
+                    await self._send_response(writer, 201, {"success": True, "message": new_msg}, req_origin=req_origin)
+                    return
+
+                # GET /admin/cases/<code>/evidence/<ev_id>
+                elif method == "GET" and len(parts) == 5 and parts[3] == "evidence":
+                    if not parts[4].isdigit():
+                        await self._send_response(writer, 400, {"error": "Invalid evidence ID."}, req_origin=req_origin)
+                        return
+                    ev_id = int(parts[4])
+                    ev_item = self.vault.get_evidence_item(case_code, ev_id)
+                    if not ev_item:
+                        await self._send_response(writer, 404, {"error": "Evidence item not found."}, req_origin=req_origin)
+                        return
+                    try:
+                        ev_bytes, _ = await self._get_or_fetch_evidence_bytes(case_code, ev_item)
+                    except EvidenceTooLargeError as exc:
+                        await self._send_response(writer, 413, {"error": str(exc), "too_large_for_webapp": True}, req_origin=req_origin)
+                        return
+                    except FileNotFoundError:
+                        await self._send_response(writer, 404, {"error": "Evidence bytes are no longer available."}, req_origin=req_origin)
+                        return
+
+                    clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', str(ev_item.get("original_name") or "evidence.bin"))[:120]
+                    ext = os.path.splitext(clean_name)[1].lower()
+                    is_preview = (query.get("preview") == "1" or headers.get("x-preview") == "1")
+                    if is_preview and ext in self.SAFE_PREVIEW_EXTS:
+                        resp_mime = self.SAFE_PREVIEW_EXTS[ext]
+                        disp = f'inline; filename="{clean_name}"'
+                    else:
+                        resp_mime = "application/octet-stream"
+                        disp = f'attachment; filename="{clean_name}"'
+
+                    extra_headers = [
+                        "Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'none'",
+                        "X-Content-Type-Options: nosniff",
+                        "X-Frame-Options: DENY",
+                        "Cross-Origin-Opener-Policy: same-origin",
+                        "Cross-Origin-Resource-Policy: same-origin",
+                        "X-Permitted-Cross-Domain-Policies: none",
+                        "Cache-Control: no-store",
+                        f"Content-Disposition: {disp}",
+                    ]
+                    await self._send_bytes_response(writer, 200, "OK", ev_bytes, resp_mime, extra_headers=extra_headers)
+                    return
+
+                # POST /admin/cases/<code>/evidence/<ev_id>/ticket
+                elif method == "POST" and len(parts) == 6 and parts[3] == "evidence" and parts[5] == "ticket":
+                    if not parts[4].isdigit():
+                        await self._send_response(writer, 400, {"error": "Invalid evidence ID."}, req_origin=req_origin)
+                        return
+                    ev_id = int(parts[4])
+                    ev_item = self.vault.get_evidence_item(case_code, ev_id)
+                    if not ev_item:
+                        await self._send_response(writer, 404, {"error": "Evidence item not found."}, req_origin=req_origin)
+                        return
+                    if int(ev_item.get("file_size") or 0) > self.MAX_EVIDENCE_BYTES and not ev_item.get("stored_filename"):
+                        await self._send_response(writer, 413, {"error": "File exceeds 20 MB; use 'Send to Bot DM'.", "too_large_for_webapp": True}, req_origin=req_origin)
+                        return
+                    self._evict_expired_admin_sessions()
+                    ticket = secrets.token_urlsafe(24)
+                    self._dl_tickets[ticket] = {
+                        "case_code": case_code,
+                        "ev_id": ev_id,
+                        "admin_id": sess["user_id"],
+                        "expires_at": time.time() + 30.0,
+                    }
+                    clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', str(ev_item.get("original_name") or "evidence.bin"))[:120]
+                    await self._send_response(writer, 200, {
+                        "success": True,
+                        "ticket": ticket,
+                        "url_path": f"/api/support/admin/dl/{ticket}",
+                        "filename": clean_name,
+                        "expires_in": 30,
+                    }, req_origin=req_origin)
+                    return
+
+                # POST /admin/cases/<code>/evidence/<ev_id>/send-dm
+                elif method == "POST" and len(parts) == 6 and parts[3] == "evidence" and parts[5] == "send-dm":
+                    if not parts[4].isdigit():
+                        await self._send_response(writer, 400, {"error": "Invalid evidence ID."}, req_origin=req_origin)
+                        return
+                    ev_id = int(parts[4])
+                    ev_item = self.vault.get_evidence_item(case_code, ev_id)
+                    if not ev_item:
+                        await self._send_response(writer, 404, {"error": "Evidence item not found."}, req_origin=req_origin)
+                        return
+                    try:
+                        sent_ok = await self.bridge.send_evidence_to_admin_dm(sess["user_id"], case_code, ev_item)
+                    except Exception as exc:
+                        await self._send_response(writer, 502, {"error": f"Failed to send evidence to DM: {exc}"}, req_origin=req_origin)
+                        return
+                    if not sent_ok:
+                        await self._send_response(writer, 503, {"error": "Telegram Bot DM delivery is currently unavailable."}, req_origin=req_origin)
+                        return
+                    self.vault.record_admin_audit(case_code, "EVIDENCE_SENT_DM", sess["actor_label"], f"Evidence #{ev_id}")
+                    await self._send_response(writer, 200, {"success": True}, req_origin=req_origin)
+                    return
+
+                # DELETE /admin/cases/<code> (or POST /admin/cases/<code>/delete) — SUPER ADMIN ONLY
+                elif (method == "DELETE" and len(parts) == 3) or (method == "POST" and len(parts) == 4 and parts[3] == "delete"):
+                    if not sess["is_super_admin"]:
+                        await self._send_response(writer, 403, {"error": "Permission Denied: Case deletion requires Super Admin privileges."}, req_origin=req_origin)
+                        return
+                    del_info = self.vault.delete_case(case_code)
+                    if not del_info:
+                        await self._send_response(writer, 404, {"error": f"Case #{case_code} not found."}, req_origin=req_origin)
+                        return
+                    for uid_key in [u for u, cc in self.bridge.active_reply_sessions.items() if cc == case_code]:
+                        self.bridge.active_reply_sessions.pop(uid_key, None)
+                    for mid_key in [m for m, cc in self.bridge.msg_to_case.items() if cc == case_code]:
+                        self.bridge.msg_to_case.pop(mid_key, None)
+                    stale_cache_keys = [k for k in self._evidence_cache if k.startswith(f"{case_code}:")]
+                    for ck in stale_cache_keys:
+                        _, cbytes = self._evidence_cache.pop(ck, (0.0, b""))
+                        self._evidence_cache_bytes = max(0, self._evidence_cache_bytes - len(cbytes))
+                    tg_cleanup: List[Tuple[int, int]] = list(del_info.get("evidence_tg_messages") or [])
+                    target_chat = self.bridge.ops_group_chat_id or self.bridge.admin_chat_id
+                    if target_chat:
+                        for ops_mid in del_info.get("ops_telegram_message_ids") or []:
+                            tg_cleanup.append((int(target_chat), int(ops_mid)))
+                    if tg_cleanup:
+                        asyncio.create_task(self.bridge.delete_telegram_messages(tg_cleanup))
+                    await self._send_response(writer, 200, {"success": True, "deleted_case": case_code}, req_origin=req_origin)
+                    return
+
+                else:
+                    await self._send_response(writer, 404, {"error": f"Endpoint '{clean_path}' not found."}, req_origin=req_origin)
+                    return
 
             else:
                 await self._send_response(writer, 404, {"error": f"Endpoint '{clean_path}' not found."}, req_origin=req_origin)
@@ -2389,8 +3592,8 @@ class SupportApiServer:
             "X-Permitted-Cross-Domain-Policies: none",
             "Permissions-Policy: camera=(), microphone=(), geolocation=()",
             "Referrer-Policy: no-referrer",
-            "Access-Control-Allow-Methods: GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key",
+            "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Case-Key, X-Preview",
         ]
         cors_origin = self._resolve_cors_origin(req_origin)
         if cors_origin:
@@ -2404,6 +3607,30 @@ class SupportApiServer:
         ])
         headers_raw = "\r\n".join(header_lines).encode('utf-8')
         writer.write(headers_raw + body_bytes)
+        await writer.drain()
+
+    async def _send_bytes_response(
+        self,
+        writer: asyncio.StreamWriter,
+        status_code: int,
+        status_msg: str,
+        body_bytes: bytes,
+        content_type: str,
+        extra_headers: Optional[List[str]] = None,
+    ):
+        header_lines = [
+            f"HTTP/1.1 {status_code} {status_msg}",
+            f"Content-Type: {content_type}",
+        ]
+        if extra_headers:
+            header_lines.extend(extra_headers)
+        header_lines.extend([
+            f"Content-Length: {len(body_bytes)}",
+            "Connection: close",
+            "",
+            "",
+        ])
+        writer.write("\r\n".join(header_lines).encode("utf-8") + body_bytes)
         await writer.drain()
 
 
@@ -2422,6 +3649,9 @@ def init_support_hub(
     super_admin_callback: Optional[Callable[[int], bool]] = None,
     ops_group_chat_id: Optional[int] = None,
     storage_chat_id: Optional[int] = None,
+    webapp_url: Optional[str] = None,
+    bot_username: Optional[str] = None,
+    webapp_shortname: Optional[str] = None,
 ) -> SupportApiServer:
     """Initialize the Vault, Bot Bridge, and HTTP Server on the bot's asyncio loop."""
     vault = SupportVault(ghost_dir=ghost_dir)
@@ -2434,6 +3664,9 @@ def init_support_hub(
         super_admin_callback=super_admin_callback,
         ops_group_chat_id=ops_group_chat_id,
         storage_chat_id=storage_chat_id,
+        webapp_url=webapp_url,
+        bot_username=bot_username,
+        webapp_shortname=webapp_shortname,
     )
     server = SupportApiServer(vault=vault, bridge=bridge, host=host, port=port)
     return server
