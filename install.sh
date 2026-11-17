@@ -219,7 +219,7 @@ conf_dirs = ["/etc/nginx/sites-enabled", "/etc/nginx/sites-available", "/etc/ngi
 csp_map_path = "/etc/nginx/conf.d/ghost-csp-map.conf"
 sec_snippet_path = "/etc/nginx/snippets/ghost-security-headers.conf"
 
-csp_mode = os.environ.get("GHOST_CSP_MODE", "report-only").strip().lower()
+csp_mode = os.environ.get("GHOST_CSP_MODE", "enforce").strip().lower()
 coop_mode = os.environ.get("GHOST_COOP_MODE", "enforce").strip().lower()
 coop_strict = os.environ.get("GHOST_COOP_STRICT", "0").strip() == "1"
 coep_ro_enabled = os.environ.get("GHOST_COEP_REPORT_ONLY", "0").strip() == "1"
@@ -247,7 +247,7 @@ strict_default_csp = (
 strict_admin_csp = (
     "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; "
     "form-action 'self'; "
-    "script-src 'self' https://cdn.jsdelivr.net https://js.stripe.com; "
+    "script-src 'self' 'sha256-5C/35Wp+ZiN8EForPykJZOHzJSx4r8Cst8q0HH+bKPw=' https://cdn.jsdelivr.net https://js.stripe.com; "
     "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://fonts.googleapis.com https://cdn.jsdelivr.net; "
     "font-src 'self' data: https://fonts.bunny.net https://fonts.gstatic.com https://cdn.jsdelivr.net; "
     "img-src 'self' data: blob: https:; "
@@ -320,6 +320,7 @@ else:
 
 sec_snippet_content = f"""# Ghost CMS & Support Portal Hardened Security Headers (included inside location /)
 # Active rollout flags: GHOST_CSP_MODE={csp_mode}, GHOST_COOP_MODE={coop_mode}, GHOST_COOP_STRICT={int(coop_strict)}, GHOST_COEP_REPORT_ONLY={int(coep_ro_enabled)}
+proxy_hide_header X-Powered-By;
 proxy_hide_header X-Frame-Options;
 proxy_hide_header X-Content-Type-Options;
 proxy_hide_header Content-Security-Policy;
@@ -351,6 +352,7 @@ proxy_block = """    # Ghost Support Portal & Telegram Bot API Proxy
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_hide_header X-Powered-By;
         proxy_hide_header Cross-Origin-Opener-Policy;
         proxy_hide_header Cross-Origin-Resource-Policy;
         proxy_hide_header X-Permitted-Cross-Domain-Policies;
@@ -424,6 +426,7 @@ def patch_vhost_text(content: str) -> str:
                     or "X-Permitted-Cross-Domain-Policies" not in block_slice
                     or "Cross-Origin-Opener-Policy" not in block_slice
                     or "Cross-Origin-Resource-Policy" not in block_slice
+                    or "proxy_hide_header X-Powered-By" not in block_slice
                 ):
                     out = out[:m.start()] + proxy_block + out[close_idx + 1:]
     else:
@@ -470,6 +473,17 @@ def patch_vhost_text(content: str) -> str:
             new_inner = "\n        include snippets/ghost-security-headers.conf;" + new_inner
         if new_inner != inner:
             out = out[:brace_idx + 1] + new_inner + out[close_idx:]
+
+    other_loc_matches = list(re.finditer(r"^[ \t]*location\s+(?!/\s*\{)(?!/api/support/\s*\{)[^\n{]+\{", out, flags=re.M))
+    for m in reversed(other_loc_matches):
+        brace_idx = out.find("{", m.start())
+        close_idx = find_matching_brace(out, brace_idx)
+        if close_idx == -1:
+            continue
+        inner = out[brace_idx + 1:close_idx]
+        if "2368" not in inner or "ghost-security-headers.conf" in inner or "proxy_hide_header X-Powered-By" in inner:
+            continue
+        out = out[:brace_idx + 1] + "\n        proxy_hide_header X-Powered-By;" + inner + out[close_idx:]
     return out
 
 backups = {}
